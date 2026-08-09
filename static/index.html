@@ -190,6 +190,31 @@
           </button>
         </div>
       </header>
+      <div id="editor-source-bar" class="editor-source-bar">
+        <div class="editor-source-tabs" role="tablist" aria-label="Skill 包文件">
+          <button type="button" class="editor-source-tab active" id="editor-source-skill" role="tab" aria-selected="true" onclick="switchEditorSource('skill')">
+            SKILL.md
+          </button>
+          <button type="button" class="editor-source-tab" id="editor-source-openai" role="tab" aria-selected="false" onclick="switchEditorSource('openai')">
+            agents/openai.yaml
+            <span id="editor-openai-state" class="editor-source-state">可选</span>
+          </button>
+        </div>
+        <span id="editor-source-hint">name 标识 Skill；description 参与隐式匹配；正文是选中后加载的执行指令</span>
+      </div>
+      <div id="editor-openai-hint" class="editor-openai-hint" hidden>
+        <i data-lucide="info" aria-hidden="true"></i>
+        <div>
+          <div class="editor-openai-hint-header">
+            <strong id="editor-openai-hint-title">调用策略与使用配置</strong>
+            <div class="editor-mode-switch" role="tablist" aria-label="OpenAI 元数据编辑模式">
+              <button type="button" id="editor-openai-mode-form" class="editor-mode-button active" onclick="switchOpenaiEditorMode('form')">可视化配置</button>
+              <button type="button" id="editor-openai-mode-yaml" class="editor-mode-button" onclick="switchOpenaiEditorMode('yaml')">YAML 源码</button>
+            </div>
+          </div>
+          <p id="editor-openai-hint-body">发布或启用全局目标只决定 Skill 是否可被发现；是否允许自动调用由 policy.allow_implicit_invocation 独立控制。</p>
+        </div>
+      </div>
       <div id="skill-metadata-bar" class="skill-metadata-bar">
         <label id="skill-category-label" for="skill-category-select">分类</label>
         <div class="skill-category-picker">
@@ -210,7 +235,69 @@
       </div>
       <div id="modal-body" class="modal-body tab-edit">
         <div class="editor-wrapper">
-          <textarea id="markdown-textarea" class="markdown-textarea" placeholder="# 输入技能内容…"></textarea>
+          <textarea id="markdown-textarea" class="markdown-textarea" spellcheck="false" placeholder="# 输入技能内容…"></textarea>
+          <div id="openai-form-editor" class="openai-form-editor" hidden>
+            <div class="openai-form-intro">
+              <div>
+                <strong id="openai-form-title">Skill 使用配置</strong>
+                <p id="openai-form-description">这些字段影响 Skill 在 OpenAI/Codex 中如何显示、被调用以及运行前需要哪些工具。</p>
+              </div>
+              <span id="openai-form-source-note">保存时同步写入 agents/openai.yaml</span>
+            </div>
+
+            <section class="openai-form-section">
+              <div class="openai-field-card">
+                <label for="openai-display-name"><span id="openai-display-name-label">显示名称</span><code>display_name</code></label>
+                <input id="openai-display-name" class="openai-form-input" type="text" autocomplete="off">
+                <p id="openai-display-name-help">显示在 Skill 选择界面中；不会改变 Skill 的 $调用名称。</p>
+              </div>
+              <div class="openai-field-card">
+                <label for="openai-short-description"><span id="openai-short-description-label">界面简短说明</span><code>short_description</code></label>
+                <textarea id="openai-short-description" class="openai-form-textarea compact" rows="2"></textarea>
+                <p id="openai-short-description-help">帮助用户在列表中理解用途；隐式匹配仍由 SKILL.md 的 description 决定。</p>
+              </div>
+              <div class="openai-field-card wide">
+                <label for="openai-default-prompt"><span id="openai-default-prompt-label">推荐使用提示</span><code>default_prompt</code></label>
+                <textarea id="openai-default-prompt" class="openai-form-textarea" rows="3"></textarea>
+                <p id="openai-default-prompt-help">用户选择此 Skill 时可参考的起始请求；它不是 Skill 的内部执行指令。</p>
+              </div>
+            </section>
+
+            <section class="openai-form-section policy-section">
+              <div class="openai-section-heading">
+                <div>
+                  <strong id="openai-implicit-title">自动调用策略</strong>
+                  <code>policy.allow_implicit_invocation</code>
+                </div>
+                <p id="openai-implicit-help">控制系统能否根据用户请求自动选择此 Skill；与是否发布到全局目标无关。</p>
+              </div>
+              <div class="openai-choice-grid">
+                <label class="openai-choice-card">
+                  <input type="radio" name="openai-implicit" value="true">
+                  <span><strong id="openai-implicit-allow-title">允许自动调用</strong><small id="openai-implicit-allow-help">请求与 SKILL.md 的 description 匹配时，系统可以自动选择。</small></span>
+                </label>
+                <label class="openai-choice-card">
+                  <input type="radio" name="openai-implicit" value="false">
+                  <span><strong id="openai-implicit-manual-title">仅手动调用</strong><small id="openai-implicit-manual-help">系统不会自动选择，但用户仍可通过 $skill-name 显式调用。</small></span>
+                </label>
+              </div>
+            </section>
+
+            <section class="openai-form-section dependency-section">
+              <div class="openai-section-heading dependency-heading">
+                <div>
+                  <strong id="openai-dependencies-title">工具依赖（可选）</strong>
+                  <code>dependencies.tools</code>
+                </div>
+                <button type="button" class="btn btn-secondary openai-add-tool" onclick="addOpenaiToolDependency()">
+                  <i data-lucide="plus" aria-hidden="true"></i><span id="openai-add-tool-label">添加工具依赖</span>
+                </button>
+              </div>
+              <p id="openai-dependencies-help">声明 Skill 正常运行所需的 MCP 等工具；这里只描述依赖，不会自动安装、授权或连接工具。</p>
+              <div id="openai-tools-list" class="openai-tools-list"></div>
+              <div id="openai-tools-empty" class="openai-tools-empty">当前没有工具依赖。无需外部工具的 Skill 可以保持为空。</div>
+            </section>
+          </div>
         </div>
         <div class="preview-wrapper">
           <div id="markdown-preview" class="markdown-preview"></div>

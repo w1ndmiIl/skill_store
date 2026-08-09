@@ -2,7 +2,7 @@
 
 [English](README_EN.md) · [使用说明书](docs/SkillHub使用说明书.md) · [下载最新版](https://github.com/w1ndwill/skill_store/releases/latest) · [MIT License](LICENSE)
 
-SkillHub 是一个本地运行的 AI Skill 管理与同步工具。它用于集中保存可复用的开发规则、工作流和专业能力，并将它们按需应用到不同项目或 Codex、Claude Code、Antigravity、Gemini CLI、VS Code/Copilot 等客户端。当前版本：**3.4.0**。
+SkillHub 是一个本地运行的 AI Skill 管理与同步工具。它用于集中保存可复用的开发规则、工作流和专业能力，并将它们按需应用到不同项目或 Codex、Claude Code、Antigravity、Gemini CLI、VS Code/Copilot 等客户端。当前版本：**3.5.0**。
 
 用户可以在写入前查看变化、冲突和作用域重叠，在写入后安全回滚；导入体检和展示本地化不会直接改写第三方 Skill 的原始语义。SkillOps Agent 是可选辅助功能，用自然语言帮助查找、检查和维护 Skill，不取代手动管理与审批流程。
 
@@ -41,6 +41,12 @@ SkillHub 支持导入 Markdown、ZIP、标准 `SKILL.md` 文件夹和仓库集�
 
 详情抽屉展示来源、分类、标签、Frontmatter 和渲染后的 Markdown。编辑操作显式进入源文件，项目专属 Skill 保持只读。
 
+#### Skill 使用配置编辑
+
+![Skill 使用配置可视化编辑](docs/screenshots/zh/skill-metadata-editor.png)
+
+标准 Skill 文件夹可分别编辑 `SKILL.md` 和 `agents/openai.yaml`。后者默认提供可视化配置，逐项说明显示名称、界面简短说明、推荐使用提示、自动调用策略及工具依赖的作用；高级用户仍可切换到 YAML 源码。全局启用只决定 Skill 是否对目标客户端可用，`allow_implicit_invocation` 独立决定是否允许模型根据请求自动选择该 Skill。
+
 ### 2. 分发与项目同步
 
 #### 项目独立配置
@@ -69,6 +75,7 @@ SkillHub 支持导入 Markdown、ZIP、标准 `SKILL.md` 文件夹和仓库集�
 | 能力 | 当前行为 |
 | --- | --- |
 | 全局技能库 | 管理 Markdown 规则、标准 `SKILL.md` 文件夹和 Skill 集合 |
+| Skill 使用配置 | 可视化编辑 `agents/openai.yaml` 的界面元数据、调用策略和工具依赖，并保留 YAML 高级模式 |
 | 多客户端全局启用 | 每个 Skill 独立选择 Codex、Claude Code、Antigravity、Gemini CLI、VS Code/Copilot 或 Claude Desktop；发布时生成目标端适配副本，不改源 Skill |
 | Claude Desktop 导出 | 生成符合上传结构的 ZIP；由于 Claude Desktop 不监听本地 Skill 目录，仍需在 `Customize > Skills` 中手动上传 |
 | 导入体检 | 在本机识别重复、同名冲突、风险条目、路径问题及六类客户端兼容性；Claude 工具预授权单独提示 |

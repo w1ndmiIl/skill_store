@@ -1,6 +1,6 @@
 # SkillHub 使用说明书
 
-> 适用版本：3.4.0
+> 适用版本：3.5.0
 >
 > 运行平台：Windows
 >
@@ -8,7 +8,7 @@
 
 SkillHub 是一个本地运行的 AI Skill 管理工具。它把可复用 Skill 保存在统一的全局库中，再由使用者为不同项目选择所需内容。同步前可以预览新增、修改、删除和冲突；同步后，项目通过 `AGENTS.md` 与 `.agent/skills/` 向 AI 开发工具提供规则。
 
-SkillHub 的主要能力包括全局 Skill 管理、文件与仓库导入、集合组织、项目独立配置、同步预览、冲突保护和同步撤销。3.4.0 同时提供可选的 SkillOps Agent 辅助模块，并完成桌面 API、导入、同步、全局发布与运行时基础设施的模块化重构；手动管理和项目同步仍可独立使用。
+SkillHub 的主要能力包括全局 Skill 管理、文件与仓库导入、集合组织、项目独立配置、同步预览、冲突保护和同步撤销。3.5.0 增加标准 Skill 包的可视化使用配置编辑，并继续提供可选的 SkillOps Agent 辅助模块；手动管理和项目同步仍可独立使用。
 
 本说明书介绍实际使用方法、Skill 类型、集合逻辑、项目同步机制、本地数据位置和常见问题。
 
@@ -344,7 +344,24 @@ collection\
 
 全局库模式下可以新建单文件 Skill，也可以打开已有 Skill 编辑入口文档。
 
-对于标准文件夹，编辑目标是 `SKILL.md`；对于 Bundle，编辑目标通常是 `README.md`。保存后 SkillHub 会更新库索引，项目副本不会立即变化，需要重新同步。
+对于标准 Skill 文件夹，编辑窗口提供两个来源：
+
+- `SKILL.md`：Skill 的名称、触发说明和完整工作指令；
+- `agents/openai.yaml`：OpenAI/Codex 使用的界面元数据、推荐提示、调用策略与工具依赖。
+
+![Skill 使用配置可视化编辑](screenshots/zh/skill-metadata-editor.png)
+
+`agents/openai.yaml` 默认使用可视化配置，不要求用户记忆 YAML 结构。每个字段旁都会说明“它影响什么”和“它不影响什么”：
+
+- `display_name` 只改变界面显示名称，不会改变 `$skill-name` 调用名称；
+- `short_description` 用于界面列表简述，隐式匹配仍由 `SKILL.md` 的 `description` 决定；
+- `default_prompt` 是用户选择 Skill 时可参考的起始请求，不是 Skill 内部执行指令；
+- `policy.allow_implicit_invocation` 可选择“允许自动调用”或“仅手动调用”。全局启用只表示目标客户端可以使用该 Skill，不等于一定允许自动调用；
+- `dependencies.tools` 用于声明 Skill 运行时需要的 MCP 工具及其连接信息。
+
+高级用户可以切换到“YAML 源码”编辑扩展字段。通过可视化表单保存时会保留未知字段和值，但 YAML 注释和排版可能被规范化。若原 YAML 无法解析，编辑器会自动回到源码模式，修复前不会用表单覆盖原内容。
+
+对于 Bundle，编辑目标通常是 `README.md`。保存后 SkillHub 会更新库索引，项目副本不会立即变化，需要重新同步。
 
 ### 7.2 分类
 
