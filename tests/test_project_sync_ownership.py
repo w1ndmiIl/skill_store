@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from main import Api
 
@@ -178,6 +179,18 @@ class ProjectSyncOwnershipTests(unittest.TestCase):
         next_preview = self.api.preview_sync(str(self.project_dir), [])
         self.assertEqual(next_preview["summary"]["delete"], 0)
         self.assertEqual(next_preview["summary"]["preserve"], 0)
+
+    def test_project_status_skips_unneeded_global_target_inspection(self):
+        write_text(self.skills_dir / "alpha.md", "# Alpha\n")
+
+        with mock.patch.object(
+            self.api,
+            "_codex_global_skill_state",
+            side_effect=AssertionError("global state should not be inspected"),
+        ):
+            projects = self.api.get_projects()
+
+        self.assertEqual(projects[0]["skills_status"]["alpha.md"], "unloaded")
 
 
 if __name__ == "__main__":

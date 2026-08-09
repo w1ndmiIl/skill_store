@@ -10,24 +10,15 @@ from pathlib import PurePosixPath
 
 import requests
 
-from skillhub.domain.compatibility import inspect_agent_skill_compatibility
-from skillhub.domain.frontmatter import (
-    frontmatter_top_level_keys,
-    split_markdown_frontmatter,
-    split_markdown_frontmatter_source,
-)
+from skillhub.domain.frontmatter import split_markdown_frontmatter
 from skillhub.domain.global_targets import SKILL_LIBRARY_STATE_DIR
-from skillhub.domain.imports import SKILL_IMPORT_MAX_TOTAL_BYTES, scan_skill_text
-from skillhub.domain.naming import normalize_skill_filename
+from skillhub.domain.imports import scan_skill_text
 from skillhub.infrastructure.filesystem import (
     atomic_copy_file,
     atomic_write_bytes,
     atomic_write_json,
-    atomic_write_text,
     get_tree_sha256,
-    is_path_reparse_point,
     load_json_file,
-    safe_child_path,
     safe_real_child_path,
 )
 from skillhub.settings import AGENT_REMOTE_COLLECTIONS_DIR

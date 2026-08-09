@@ -25,7 +25,7 @@ class ProjectsApiMixin:
         """Return projects list with per-skill sync status."""
         result = []
         md5_cache = {}
-        global_skills = self.get_skills()
+        global_skills = self._collect_skills(include_global_state=False)
         dir_skills = [skill for skill in global_skills if skill.get("is_dir", False)]
         file_skills = [skill for skill in global_skills if not skill.get("is_dir", False)]
         bundle_collections = {
@@ -67,6 +67,7 @@ class ProjectsApiMixin:
                     else None
                 ),
             }
+            project_enabled = set(entry["enabled_skills"] or [])
             if not os.path.isdir(path):
                 entry["error"] = "路径不存在" if self.language == "zh" else "Path does not exist"
                 result.append(entry)
@@ -83,7 +84,6 @@ class ProjectsApiMixin:
                 ignored_relative_paths = set()
                 bundle_collection = bundle_collections.get(fname, {})
                 if entry["enabled_skills"] is not None:
-                    project_enabled = set(entry["enabled_skills"])
                     ignored_relative_paths = {
                         relative
                         for virtual_id, relative in bundle_collection.get(

@@ -361,6 +361,68 @@ allowed-tools:
             self.assertFalse(os.path.lexists(published))
             self.assertFalse(Path(descriptor["codex_link_source"]).exists())
 
+    def test_disabled_targets_do_not_hash_skill_content(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            skills = root / "skills"
+            skill = skills / "sample-skill"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                "---\nname: sample-skill\ndescription: Stable behavior.\n---\n",
+                encoding="utf-8",
+            )
+            api = self.make_api(skills)
+            api._global_skill_target_dir_overrides = {
+                target_id: str(root / target_id)
+                for target_id in main.GLOBAL_SKILL_TARGETS
+            }
+
+            with mock.patch.object(
+                api,
+                "_codex_global_source_hash",
+                wraps=api._codex_global_source_hash,
+            ) as source_hash:
+                state = api._codex_global_skill_state("sample-skill")
+
+            self.assertEqual(state["codex_global_status"], "disabled")
+            source_hash.assert_not_called()
+
+    def test_enabled_targets_share_one_source_hash(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            skills = root / "skills"
+            skill = skills / "sample-skill"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                "---\nname: sample-skill\ndescription: Stable behavior.\n---\n",
+                encoding="utf-8",
+            )
+            api = self.make_api(skills)
+            api._global_skill_target_dir_overrides = {
+                target_id: str(root / target_id)
+                for target_id in main.GLOBAL_SKILL_TARGETS
+            }
+            for target_id in ("codex", "claude_code"):
+                (root / target_id / "sample-skill").mkdir(parents=True)
+
+            with (
+                mock.patch.object(api, "_same_real_path", return_value=True),
+                mock.patch.object(
+                    api,
+                    "_codex_global_source_hash",
+                    wraps=api._codex_global_source_hash,
+                ) as source_hash,
+            ):
+                state = api._codex_global_skill_state("sample-skill")
+
+            enabled = {
+                target["id"]
+                for target in state["global_target_states"]
+                if target["enabled"]
+            }
+            self.assertEqual(enabled, {"codex", "claude_code"})
+            source_hash.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
