@@ -37,6 +37,18 @@ let drawerReturnFocus = null;
 let loadedEditorCategory = '';
 let pendingEditorCategories = new Set();
 let pendingGlobalTargetSkill = null;
+let activeEditorSource = 'skill';
+let editorSkillContent = '';
+let editorOpenaiYamlContent = '';
+let editorOpenaiYamlInitialContent = '';
+let editorOpenaiYamlExists = false;
+let editorOpenaiYamlSupported = false;
+let editorOpenaiYamlDirty = false;
+let editorOpenaiYamlCreateRequested = false;
+let openaiEditorMode = 'form';
+let editorOpenaiForm = {};
+let editorOpenaiFormDirty = false;
+let editorOpenaiFormError = '';
 
 // DOM cache
 const projectList = document.getElementById('project-list');
@@ -62,6 +74,22 @@ const skillCategoryAddLabel = document.getElementById('skill-category-add-label'
 const skillCategoryDelete = document.getElementById('skill-category-delete');
 const skillCategoryDeleteLabel = document.getElementById('skill-category-delete-label');
 const skillCategoryHint = document.getElementById('skill-category-hint');
+const editorSourceBar = document.getElementById('editor-source-bar');
+const editorSourceSkill = document.getElementById('editor-source-skill');
+const editorSourceOpenai = document.getElementById('editor-source-openai');
+const editorOpenaiState = document.getElementById('editor-openai-state');
+const editorSourceHint = document.getElementById('editor-source-hint');
+const editorOpenaiHint = document.getElementById('editor-openai-hint');
+const editorOpenaiHintTitle = document.getElementById('editor-openai-hint-title');
+const editorOpenaiHintBody = document.getElementById('editor-openai-hint-body');
+const editorOpenaiModeForm = document.getElementById('editor-openai-mode-form');
+const editorOpenaiModeYaml = document.getElementById('editor-openai-mode-yaml');
+const openaiFormEditor = document.getElementById('openai-form-editor');
+const openaiDisplayName = document.getElementById('openai-display-name');
+const openaiShortDescription = document.getElementById('openai-short-description');
+const openaiDefaultPrompt = document.getElementById('openai-default-prompt');
+const openaiToolsList = document.getElementById('openai-tools-list');
+const openaiToolsEmpty = document.getElementById('openai-tools-empty');
 const toastContainer = document.getElementById('toast-container');
 const searchInput = document.getElementById('search-input');
 const skillsDirPath = document.getElementById('skills-dir-path');
@@ -240,6 +268,46 @@ const locales = {
     editCategoryDeleteEmpty: '这个类别没有可修改的全局 Skill，无法删除',
     editCategoryDeleteSuccess: '类别已删除，相关 Skill 已归入未分类',
     editCategoryHint: '保存时会同步更新 Skill 文件中的 category 字段',
+    editSourceSkillHint: 'name 标识 Skill；description 参与隐式匹配；正文是选中后加载的执行指令',
+    editSourceOpenaiHint: 'OpenAI/Codex 的界面元数据与调用策略',
+    editOpenaiExisting: '已存在',
+    editOpenaiNew: '保存后创建',
+    editOpenaiUnsupported: '不适用',
+    editOpenaiHintTitle: '调用策略与使用配置',
+    editOpenaiHintBody: '发布或启用全局目标只决定 Skill 是否可被发现；是否允许自动调用由 policy.allow_implicit_invocation 独立控制。',
+    editFieldDisplayName: '界面显示名称',
+    editFieldShortDescription: '界面简短说明',
+    editFieldDefaultPrompt: '显式调用时的推荐提示',
+    editFieldImplicit: '是否允许系统自动选择此 Skill',
+    editFieldDependencies: 'Skill 所需的 MCP 等工具依赖',
+    openaiModeForm: '可视化配置',
+    openaiModeYaml: 'YAML 源码',
+    openaiFormTitle: 'Skill 使用配置',
+    openaiFormDescription: '这些字段影响 Skill 在 OpenAI/Codex 中如何显示、被调用以及运行前需要哪些工具。',
+    openaiFormSourceNote: '保存时同步写入 agents/openai.yaml',
+    openaiDisplayNameLabel: '显示名称',
+    openaiDisplayNameHelp: '显示在 Skill 选择界面中；不会改变 Skill 的 $调用名称。',
+    openaiShortDescriptionLabel: '界面简短说明',
+    openaiShortDescriptionHelp: '帮助用户在列表中理解用途；隐式匹配仍由 SKILL.md 的 description 决定。',
+    openaiDefaultPromptLabel: '推荐使用提示',
+    openaiDefaultPromptHelp: '用户选择此 Skill 时可参考的起始请求；它不是 Skill 的内部执行指令。',
+    openaiImplicitTitle: '自动调用策略',
+    openaiImplicitHelp: '控制系统能否根据用户请求自动选择此 Skill；与是否发布到全局目标无关。',
+    openaiImplicitAllowTitle: '允许自动调用',
+    openaiImplicitAllowHelp: '请求与 SKILL.md 的 description 匹配时，系统可以自动选择。',
+    openaiImplicitManualTitle: '仅手动调用',
+    openaiImplicitManualHelp: '系统不会自动选择，但用户仍可通过 $skill-name 显式调用。',
+    openaiDependenciesTitle: '工具依赖（可选）',
+    openaiDependenciesHelp: '声明 Skill 正常运行所需的 MCP 等工具；这里只描述依赖，不会自动安装、授权或连接工具。',
+    openaiAddTool: '添加工具依赖',
+    openaiToolsEmpty: '当前没有工具依赖。无需外部工具的 Skill 可以保持为空。',
+    openaiToolTitle: '工具依赖',
+    openaiToolType: '类型（必填）',
+    openaiToolValue: '工具标识（必填）',
+    openaiToolDescription: '用途说明',
+    openaiToolTransport: '连接方式',
+    openaiToolUrl: '服务地址',
+    openaiToolRemove: '删除此依赖',
     editModalTabSource: '编辑源码',
     editModalTabPreview: '实时预览',
     editModalCancel: '取消',
@@ -353,6 +421,46 @@ const locales = {
     editCategoryDeleteEmpty: 'No editable global Skill uses this category',
     editCategoryDeleteSuccess: 'Category deleted; related Skills are now uncategorized',
     editCategoryHint: 'Saving updates the category field in the Skill file',
+    editSourceSkillHint: 'name identifies the Skill; description drives implicit matching; the body contains instructions loaded after selection',
+    editSourceOpenaiHint: 'OpenAI/Codex UI metadata and invocation policy',
+    editOpenaiExisting: 'Existing',
+    editOpenaiNew: 'Created on save',
+    editOpenaiUnsupported: 'Not applicable',
+    editOpenaiHintTitle: 'Invocation policy and usage configuration',
+    editOpenaiHintBody: 'Publishing or enabling a global target only makes the Skill discoverable. policy.allow_implicit_invocation independently controls whether the system may select it automatically.',
+    editFieldDisplayName: 'User-facing display name',
+    editFieldShortDescription: 'Short UI description',
+    editFieldDefaultPrompt: 'Suggested prompt for explicit use',
+    editFieldImplicit: 'Whether the system may select this Skill automatically',
+    editFieldDependencies: 'Required MCP and other tool dependencies',
+    openaiModeForm: 'Visual configuration',
+    openaiModeYaml: 'YAML source',
+    openaiFormTitle: 'Skill usage configuration',
+    openaiFormDescription: 'These fields control how the Skill appears, is invoked, and declares required tools in OpenAI/Codex.',
+    openaiFormSourceNote: 'Saved to agents/openai.yaml',
+    openaiDisplayNameLabel: 'Display name',
+    openaiDisplayNameHelp: 'Shown in the Skill picker; it does not change the Skill\'s $invocation name.',
+    openaiShortDescriptionLabel: 'Short UI description',
+    openaiShortDescriptionHelp: 'Helps users understand the Skill in lists; implicit matching still uses SKILL.md description.',
+    openaiDefaultPromptLabel: 'Suggested starting prompt',
+    openaiDefaultPromptHelp: 'A starting request users can reference when selecting this Skill; it is not an internal instruction.',
+    openaiImplicitTitle: 'Automatic invocation policy',
+    openaiImplicitHelp: 'Controls whether the system may select this Skill from the user request; independent of global publication.',
+    openaiImplicitAllowTitle: 'Allow automatic invocation',
+    openaiImplicitAllowHelp: 'The system may select the Skill when the request matches the SKILL.md description.',
+    openaiImplicitManualTitle: 'Manual invocation only',
+    openaiImplicitManualHelp: 'The system will not select it automatically; users can still invoke it with $skill-name.',
+    openaiDependenciesTitle: 'Tool dependencies (optional)',
+    openaiDependenciesHelp: 'Declares MCP and other tools required by the Skill. This does not install, authorize, or connect tools.',
+    openaiAddTool: 'Add tool dependency',
+    openaiToolsEmpty: 'No tool dependencies. Skills that need no external tools can leave this empty.',
+    openaiToolTitle: 'Tool dependency',
+    openaiToolType: 'Type (required)',
+    openaiToolValue: 'Tool identifier (required)',
+    openaiToolDescription: 'Purpose',
+    openaiToolTransport: 'Transport',
+    openaiToolUrl: 'Service URL',
+    openaiToolRemove: 'Remove dependency',
     editModalTabSource: 'Edit Source',
     editModalTabPreview: 'Live Preview',
     editModalCancel: 'Cancel',
@@ -596,6 +704,37 @@ function applyLanguage(lang) {
   skillCategoryAddLabel.textContent = t.editCategoryAdd;
   skillCategoryDeleteLabel.textContent = t.editCategoryDelete;
   skillCategoryHint.textContent = t.editCategoryHint;
+  editorOpenaiHintTitle.textContent = t.editOpenaiHintTitle;
+  editorOpenaiHintBody.textContent = t.editOpenaiHintBody;
+  editorOpenaiModeForm.textContent = t.openaiModeForm;
+  editorOpenaiModeYaml.textContent = t.openaiModeYaml;
+  const editorTexts = {
+    'openai-form-title': t.openaiFormTitle,
+    'openai-form-description': t.openaiFormDescription,
+    'openai-form-source-note': t.openaiFormSourceNote,
+    'openai-display-name-label': t.openaiDisplayNameLabel,
+    'openai-display-name-help': t.openaiDisplayNameHelp,
+    'openai-short-description-label': t.openaiShortDescriptionLabel,
+    'openai-short-description-help': t.openaiShortDescriptionHelp,
+    'openai-default-prompt-label': t.openaiDefaultPromptLabel,
+    'openai-default-prompt-help': t.openaiDefaultPromptHelp,
+    'openai-implicit-title': t.openaiImplicitTitle,
+    'openai-implicit-help': t.openaiImplicitHelp,
+    'openai-implicit-allow-title': t.openaiImplicitAllowTitle,
+    'openai-implicit-allow-help': t.openaiImplicitAllowHelp,
+    'openai-implicit-manual-title': t.openaiImplicitManualTitle,
+    'openai-implicit-manual-help': t.openaiImplicitManualHelp,
+    'openai-dependencies-title': t.openaiDependenciesTitle,
+    'openai-dependencies-help': t.openaiDependenciesHelp,
+    'openai-add-tool-label': t.openaiAddTool,
+    'openai-tools-empty': t.openaiToolsEmpty,
+  };
+  Object.entries(editorTexts).forEach(([id, value]) => {
+    const element = document.getElementById(id);
+    if (element) element.textContent = value;
+  });
+  renderOpenaiToolDependencies();
+  refreshEditorSourceUi();
   if (!skillMetadataBar.hidden) populateSkillCategoryOptions(skillCategorySelect.value);
 
   // Modals (Settings)
@@ -2756,12 +2895,247 @@ function updateSkillCategoryDeleteButton() {
     : locales[currentLanguage].editCategoryDelete;
 }
 
+function syncActiveEditorBuffer() {
+  if (activeEditorSource === 'openai') {
+    if (openaiEditorMode === 'yaml') {
+      editorOpenaiYamlContent = markdownTextarea.value;
+      editorOpenaiYamlDirty = editorOpenaiYamlContent !== editorOpenaiYamlInitialContent;
+    } else {
+      editorOpenaiForm = collectOpenaiFormData();
+    }
+  } else {
+    editorSkillContent = markdownTextarea.value;
+  }
+}
+
 function getEditorContentWithCategory() {
+  const skillSource = activeEditorSource === 'skill'
+    ? markdownTextarea.value
+    : editorSkillContent;
   const selectedCategory = skillCategorySelect.value.trim();
   if (selectedCategory === getSkillCategorySelectValue(loadedEditorCategory)) {
-    return markdownTextarea.value;
+    return skillSource;
   }
-  return setMarkdownFrontmatterCategory(markdownTextarea.value, selectedCategory);
+  return setMarkdownFrontmatterCategory(skillSource, selectedCategory);
+}
+
+function refreshEditorSourceUi() {
+  const t = locales[currentLanguage];
+  const isOpenai = activeEditorSource === 'openai';
+  const isOpenaiForm = isOpenai && openaiEditorMode === 'form';
+  editorSourceSkill.classList.toggle('active', !isOpenai);
+  editorSourceSkill.setAttribute('aria-selected', String(!isOpenai));
+  editorSourceOpenai.classList.toggle('active', isOpenai);
+  editorSourceOpenai.setAttribute('aria-selected', String(isOpenai));
+  editorSourceOpenai.disabled = !editorOpenaiYamlSupported;
+  editorOpenaiState.textContent = editorOpenaiYamlSupported
+    ? (editorOpenaiYamlExists ? t.editOpenaiExisting : t.editOpenaiNew)
+    : t.editOpenaiUnsupported;
+  editorSourceHint.textContent = isOpenai
+    ? t.editSourceOpenaiHint
+    : t.editSourceSkillHint;
+  skillMetadataBar.hidden = isViewingSkill || isOpenai;
+  editorOpenaiHint.hidden = isViewingSkill || !isOpenai;
+  editorOpenaiModeForm.classList.toggle('active', openaiEditorMode === 'form');
+  editorOpenaiModeYaml.classList.toggle('active', openaiEditorMode === 'yaml');
+  openaiFormEditor.hidden = !isOpenaiForm;
+  markdownTextarea.hidden = isOpenaiForm;
+  modalTabPreview.disabled = isOpenai;
+  modalTabPreview.title = isOpenai
+    ? (currentLanguage === 'zh' ? 'OpenAI 配置不提供 Markdown 预览' : 'OpenAI configuration does not have a Markdown preview')
+    : '';
+}
+
+function switchEditorSource(source) {
+  if (isViewingSkill || !['skill', 'openai'].includes(source)) return;
+  if (source === 'openai' && !editorOpenaiYamlSupported) return;
+  if (source === activeEditorSource) return;
+  syncActiveEditorBuffer();
+  activeEditorSource = source;
+  if (source === 'openai') {
+    if (!editorOpenaiYamlExists) editorOpenaiYamlCreateRequested = true;
+    if (modalBody.classList.contains('tab-preview')) switchModalTab('edit');
+    if (openaiEditorMode === 'form') {
+      populateOpenaiForm(editorOpenaiForm);
+    } else {
+      markdownTextarea.value = editorOpenaiYamlContent;
+    }
+    markdownTextarea.placeholder = 'interface:\n  display_name: "..."\npolicy:\n  allow_implicit_invocation: true';
+  } else {
+    markdownTextarea.value = editorSkillContent;
+    markdownTextarea.placeholder = '# 输入技能内容…';
+  }
+  refreshEditorSourceUi();
+  (source === 'openai' && openaiEditorMode === 'form'
+    ? openaiDisplayName
+    : markdownTextarea).focus();
+}
+
+markdownTextarea.addEventListener('input', syncActiveEditorBuffer);
+
+function collectOpenaiFormData() {
+  const implicit = document.querySelector('input[name="openai-implicit"]:checked');
+  const tools = Array.from(openaiToolsList.querySelectorAll('.openai-tool-card')).map(card => {
+    const sourceIndex = Number.parseInt(card.dataset.sourceIndex || '', 10);
+    const tool = {
+      type: card.querySelector('[data-field="type"]')?.value || '',
+      value: card.querySelector('[data-field="value"]')?.value || '',
+      description: card.querySelector('[data-field="description"]')?.value || '',
+      transport: card.querySelector('[data-field="transport"]')?.value || '',
+      url: card.querySelector('[data-field="url"]')?.value || '',
+    };
+    if (Number.isInteger(sourceIndex)) tool._source_index = sourceIndex;
+    return tool;
+  });
+  return {
+    display_name: openaiDisplayName.value,
+    short_description: openaiShortDescription.value,
+    default_prompt: openaiDefaultPrompt.value,
+    allow_implicit_invocation: implicit?.value !== 'false',
+    tools,
+  };
+}
+
+function populateOpenaiForm(form = {}) {
+  editorOpenaiForm = {
+    display_name: String(form.display_name || ''),
+    short_description: String(form.short_description || ''),
+    default_prompt: String(form.default_prompt || ''),
+    allow_implicit_invocation: form.allow_implicit_invocation !== false,
+    tools: Array.isArray(form.tools) ? form.tools.map(tool => ({ ...tool })) : [],
+  };
+  openaiDisplayName.value = editorOpenaiForm.display_name;
+  openaiShortDescription.value = editorOpenaiForm.short_description;
+  openaiDefaultPrompt.value = editorOpenaiForm.default_prompt;
+  const implicitValue = editorOpenaiForm.allow_implicit_invocation ? 'true' : 'false';
+  const implicitRadio = document.querySelector(`input[name="openai-implicit"][value="${implicitValue}"]`);
+  if (implicitRadio) implicitRadio.checked = true;
+  renderOpenaiToolDependencies();
+}
+
+function selectOptions(options, selectedValue) {
+  const known = options.some(option => option.value === selectedValue);
+  const values = known || !selectedValue
+    ? options
+    : [...options, { value: selectedValue, label: selectedValue }];
+  return values.map(option => (
+    `<option value="${escapeHtml(option.value)}"${option.value === selectedValue ? ' selected' : ''}>${escapeHtml(option.label)}</option>`
+  )).join('');
+}
+
+function renderOpenaiToolDependencies() {
+  if (!openaiToolsList || !openaiToolsEmpty) return;
+  const t = locales[currentLanguage];
+  const tools = Array.isArray(editorOpenaiForm.tools) ? editorOpenaiForm.tools : [];
+  openaiToolsList.innerHTML = tools.map((tool, index) => {
+    const sourceIndex = Number.isInteger(tool._source_index) ? String(tool._source_index) : '';
+    const typeOptions = selectOptions([{ value: 'mcp', label: 'MCP' }], String(tool.type || 'mcp'));
+    const transportOptions = selectOptions([
+      { value: '', label: currentLanguage === 'zh' ? '未指定' : 'Not specified' },
+      { value: 'streamable_http', label: 'streamable_http' },
+    ], String(tool.transport || ''));
+    return `
+      <div class="openai-tool-card" data-tool-index="${index}" data-source-index="${escapeHtml(sourceIndex)}">
+        <div class="openai-tool-card-header">
+          <strong>${escapeHtml(t.openaiToolTitle)} ${index + 1}</strong>
+          <button type="button" class="btn btn-secondary openai-tool-remove" title="${escapeHtml(t.openaiToolRemove)}" onclick="removeOpenaiToolDependency(${index})">
+            <i data-lucide="trash-2" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="openai-tool-grid">
+          <div class="openai-tool-field">
+            <label>${escapeHtml(t.openaiToolType)}</label>
+            <select class="openai-tool-select" data-field="type">${typeOptions}</select>
+          </div>
+          <div class="openai-tool-field">
+            <label>${escapeHtml(t.openaiToolValue)}</label>
+            <input class="openai-tool-input" data-field="value" value="${escapeHtml(tool.value || '')}" placeholder="openaiDeveloperDocs">
+          </div>
+          <div class="openai-tool-field">
+            <label>${escapeHtml(t.openaiToolDescription)}</label>
+            <input class="openai-tool-input" data-field="description" value="${escapeHtml(tool.description || '')}">
+          </div>
+          <div class="openai-tool-field">
+            <label>${escapeHtml(t.openaiToolTransport)}</label>
+            <select class="openai-tool-select" data-field="transport">${transportOptions}</select>
+          </div>
+          <div class="openai-tool-field wide">
+            <label>${escapeHtml(t.openaiToolUrl)}</label>
+            <input class="openai-tool-input" data-field="url" value="${escapeHtml(tool.url || '')}" placeholder="https://example.com/mcp">
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+  openaiToolsEmpty.hidden = tools.length > 0;
+  lucide.createIcons();
+}
+
+function markOpenaiFormDirty() {
+  if (activeEditorSource !== 'openai' || openaiEditorMode !== 'form') return;
+  editorOpenaiForm = collectOpenaiFormData();
+  editorOpenaiFormDirty = true;
+}
+
+openaiFormEditor.addEventListener('input', markOpenaiFormDirty);
+openaiFormEditor.addEventListener('change', markOpenaiFormDirty);
+
+function addOpenaiToolDependency() {
+  editorOpenaiForm = collectOpenaiFormData();
+  editorOpenaiForm.tools.push({
+    type: 'mcp',
+    value: '',
+    description: '',
+    transport: '',
+    url: '',
+  });
+  editorOpenaiFormDirty = true;
+  renderOpenaiToolDependencies();
+  openaiToolsList.querySelector('.openai-tool-card:last-child [data-field="value"]')?.focus();
+}
+
+function removeOpenaiToolDependency(index) {
+  editorOpenaiForm = collectOpenaiFormData();
+  editorOpenaiForm.tools.splice(index, 1);
+  editorOpenaiFormDirty = true;
+  renderOpenaiToolDependencies();
+}
+
+async function renderOpenaiFormToYaml() {
+  editorOpenaiForm = collectOpenaiFormData();
+  const result = await window.pywebview.api.render_openai_yaml_form(
+    editorOpenaiYamlContent,
+    editorOpenaiForm,
+  );
+  if (result.error) throw new Error(result.error);
+  editorOpenaiYamlContent = result.content;
+  editorOpenaiYamlDirty = editorOpenaiYamlContent !== editorOpenaiYamlInitialContent;
+  editorOpenaiFormDirty = false;
+  populateOpenaiForm(result.form || editorOpenaiForm);
+}
+
+async function switchOpenaiEditorMode(mode) {
+  if (activeEditorSource !== 'openai' || !['form', 'yaml'].includes(mode)) return;
+  if (mode === openaiEditorMode) return;
+  try {
+    if (mode === 'yaml') {
+      if (editorOpenaiFormDirty) await renderOpenaiFormToYaml();
+      markdownTextarea.value = editorOpenaiYamlContent;
+    } else {
+      syncActiveEditorBuffer();
+      const result = await window.pywebview.api.parse_openai_yaml_form(editorOpenaiYamlContent);
+      if (result.error) throw new Error(result.error);
+      populateOpenaiForm(result.form || {});
+      editorOpenaiFormDirty = false;
+    }
+    openaiEditorMode = mode;
+    refreshEditorSourceUi();
+    (mode === 'form' ? openaiDisplayName : markdownTextarea).focus();
+  } catch (error) {
+    showToast(
+      (currentLanguage === 'zh' ? '无法切换编辑模式: ' : 'Could not switch editor mode: ') + (error.message || error),
+      'error',
+    );
+  }
 }
 
 async function handleAddSkillCategory() {
@@ -2845,20 +3219,23 @@ skillCategorySelect.addEventListener('change', updateSkillCategoryDeleteButton);
 function resetSkillModalForEditing() {
   isViewingSkill = false;
   markdownTextarea.readOnly = false;
-  skillMetadataBar.hidden = false;
+  editorSourceBar.hidden = false;
   skillCategorySelect.disabled = false;
   updateSkillCategoryDeleteButton();
   modalSaveBtn.style.display = '';
   modalTabEdit.textContent = locales[currentLanguage].editModalTabSource;
   modalTabPreview.textContent = locales[currentLanguage].editModalTabPreview;
   modalCloseFooter.textContent = locales[currentLanguage].editModalCancel;
+  refreshEditorSourceUi();
 }
 
 function resetSkillModalForViewing() {
   isViewingSkill = true;
   editingFilename = null;
   markdownTextarea.readOnly = true;
+  editorSourceBar.hidden = true;
   skillMetadataBar.hidden = true;
+  editorOpenaiHint.hidden = true;
   skillCategorySelect.disabled = true;
   updateSkillCategoryDeleteButton();
   modalSaveBtn.style.display = 'none';
@@ -2868,6 +3245,18 @@ function resetSkillModalForViewing() {
 }
 
 async function openEditorModal(filename) {
+  activeEditorSource = 'skill';
+  editorSkillContent = '';
+  editorOpenaiYamlContent = '';
+  editorOpenaiYamlInitialContent = '';
+  editorOpenaiYamlExists = false;
+  editorOpenaiYamlSupported = false;
+  editorOpenaiYamlDirty = false;
+  editorOpenaiYamlCreateRequested = false;
+  openaiEditorMode = 'form';
+  editorOpenaiForm = {};
+  editorOpenaiFormDirty = false;
+  editorOpenaiFormError = '';
   resetSkillModalForEditing();
   editingFilename = filename;
   modalBody.className = 'modal-body tab-edit';
@@ -2884,14 +3273,24 @@ async function openEditorModal(filename) {
   markdownTextarea.setAttribute('disabled', 'true');
   activateModal(editorModal, markdownTextarea);
   try {
-    const data = await window.pywebview.api.get_skill_content(filename);
+    const data = await window.pywebview.api.get_skill_editor_data(filename);
     if (data.error) throw new Error(data.error);
-    markdownTextarea.value = data.content;
+    editorSkillContent = data.skill_content;
+    editorOpenaiYamlContent = data.openai_yaml_content || '';
+    editorOpenaiYamlInitialContent = editorOpenaiYamlContent;
+    editorOpenaiYamlExists = data.openai_yaml_exists === true;
+    editorOpenaiYamlSupported = data.openai_yaml_supported === true;
+    editorOpenaiForm = data.openai_form || {};
+    editorOpenaiFormError = data.openai_form_error || '';
+    openaiEditorMode = editorOpenaiFormError ? 'yaml' : 'form';
+    populateOpenaiForm(editorOpenaiForm);
+    markdownTextarea.value = editorSkillContent;
     loadedEditorCategory = (
-      getMarkdownFrontmatterCategory(data.content)
+      getMarkdownFrontmatterCategory(editorSkillContent)
       || String(skill?.category || '').trim()
     );
     populateSkillCategoryOptions(loadedEditorCategory);
+    refreshEditorSourceUi();
   } catch (e) {
     showToast((currentLanguage === 'zh' ? '加载失败: ' : 'Failed to load: ') + e, 'error');
     closeEditorModal();
@@ -2990,8 +3389,23 @@ function closeEditorModal() {
   isViewingSkill = false;
   loadedEditorCategory = '';
   pendingEditorCategories = new Set();
+  activeEditorSource = 'skill';
+  editorSkillContent = '';
+  editorOpenaiYamlContent = '';
+  editorOpenaiYamlInitialContent = '';
+  editorOpenaiYamlExists = false;
+  editorOpenaiYamlSupported = false;
+  editorOpenaiYamlDirty = false;
+  editorOpenaiYamlCreateRequested = false;
+  openaiEditorMode = 'form';
+  editorOpenaiForm = {};
+  editorOpenaiFormDirty = false;
+  editorOpenaiFormError = '';
   populateSkillCategoryOptions();
   markdownTextarea.readOnly = false;
+  markdownTextarea.hidden = false;
+  openaiFormEditor.hidden = true;
+  markdownTextarea.placeholder = '# 输入技能内容…';
   modalSaveBtn.style.display = '';
 }
 
@@ -3001,6 +3415,7 @@ function switchModalTab(tab) {
     modalTabPreview.classList.remove('active');
     modalBody.className = 'modal-body tab-edit';
   } else {
+    if (activeEditorSource === 'openai') return;
     modalTabEdit.classList.remove('active');
     modalTabPreview.classList.add('active');
     modalBody.className = 'modal-body tab-preview';
@@ -3012,8 +3427,18 @@ async function handleSaveSkill() {
   if (isViewingSkill) return;
   if (!editingFilename) return;
   try {
-    const content = getEditorContentWithCategory();
-    const result = await window.pywebview.api.save_skill(editingFilename, content);
+    syncActiveEditorBuffer();
+    if (editorOpenaiFormDirty) await renderOpenaiFormToYaml();
+    const skillContent = getEditorContentWithCategory();
+    const result = await window.pywebview.api.save_skill_editor_data(editingFilename, {
+      skill_content: skillContent,
+      openai_yaml_content: editorOpenaiYamlContent,
+      save_openai_yaml: (
+        editorOpenaiYamlExists
+        || editorOpenaiYamlDirty
+        || editorOpenaiYamlCreateRequested
+      ),
+    });
     if (result.error) throw new Error(result.error);
     showToast(locales[currentLanguage].toastSaveSuccess, 'success');
     closeEditorModal();

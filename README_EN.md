@@ -2,7 +2,7 @@
 
 [中文](README.md) · [User manual](docs/SkillHub使用说明书.md) · [Download the latest release](https://github.com/w1ndwill/skill_store/releases/latest) · [MIT License](LICENSE)
 
-SkillHub is a local AI Skill management and synchronization tool. It keeps reusable development rules, workflows, and specialist capabilities in one place, then applies them selectively to projects or clients such as Codex, Claude Code, Antigravity, Gemini CLI, and VS Code/Copilot. Current version: **3.4.0**.
+SkillHub is a local AI Skill management and synchronization tool. It keeps reusable development rules, workflows, and specialist capabilities in one place, then applies them selectively to projects or clients such as Codex, Claude Code, Antigravity, Gemini CLI, and VS Code/Copilot. Current version: **3.5.0**.
 
 Users can review changes, conflicts, and scope overlaps before a write and safely roll back afterward. Import inspection and display localization do not rewrite the original semantics of third-party Skills. SkillOps Agent is optional assistance for finding, inspecting, and maintaining Skills; it does not replace manual management or approval.
 
@@ -41,6 +41,10 @@ Repository imports are scanned for collection boundaries. A collection can be di
 
 The detail drawer presents source information, category, tags, Frontmatter, and rendered Markdown. Editing explicitly opens the source; project-only Skills remain read-only.
 
+#### Skill usage configuration
+
+Standard Skill folders expose both `SKILL.md` and `agents/openai.yaml`. The OpenAI metadata editor defaults to an explained form for display metadata, the recommended starter prompt, implicit invocation policy, and tool dependencies, while retaining raw YAML as an advanced mode. Global enablement controls availability for a target client; `allow_implicit_invocation` independently controls whether the model may select the Skill automatically.
+
 ### 2. Distribution and project sync
 
 #### Per-project configuration
@@ -69,6 +73,7 @@ Generated project content lives at:
 | Capability | Current behavior |
 | --- | --- |
 | Global Skill library | Manage Markdown guidance, standard `SKILL.md` folders, and Skill collections |
+| Skill usage configuration | Visually edit `agents/openai.yaml` interface metadata, invocation policy, and tool dependencies with an advanced YAML mode |
 | Multi-client global enablement | Choose Codex, Claude Code, Antigravity, Gemini CLI, VS Code/Copilot, or Claude Desktop independently for each Skill; publishing creates a client-specific view without rewriting the source Skill |
 | Claude Desktop export | Build a correctly structured upload ZIP; Claude Desktop still requires manual upload from `Customize > Skills` because it does not watch a local Skill directory |
 | Import inspection | Locally detect duplicates, same-name conflicts, risky entries, path issues, and compatibility across six clients; Claude tool pre-approval receives a separate warning |

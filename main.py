@@ -143,6 +143,7 @@ from skillhub.presentation.api.imports import ImportsApiMixin
 from skillhub.presentation.api.import_candidates import ImportCandidatesApiMixin
 from skillhub.presentation.api.import_preparation import ImportPreparationApiMixin
 from skillhub.presentation.api.library import LibraryApiMixin
+from skillhub.presentation.api.skill_editor import SkillEditorApiMixin
 from skillhub.presentation.api.project_sync import ProjectSyncApiMixin
 from skillhub.presentation.api.projects import ProjectsApiMixin
 
@@ -159,6 +160,7 @@ class Api(
     AgentRuntimeApiMixin,
     ChatApiMixin,
     AiSkillsApiMixin,
+    SkillEditorApiMixin,
     LibraryApiMixin,
     CollectionsApiMixin,
     ImportPreparationApiMixin,
