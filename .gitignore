@@ -30,6 +30,7 @@ AGENTS.md
 /tests/*
 !/tests/test_codex_global_skills.py
 !/tests/test_frontend_collection_display.py
+!/tests/test_frontend_ui_quality.py
 !/tests/test_modular_architecture.py
 !/tests/test_refactored_workflows.py
 !/tests/test_project_sync_ownership.py

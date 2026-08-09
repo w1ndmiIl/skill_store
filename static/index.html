@@ -4,9 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SkillHub</title>
-  <link rel="icon" type="image/svg+xml" href="app-icon.svg">
-  <link rel="alternate icon" type="image/png" href="app-icon.png">
-  <link rel="stylesheet" href="index.css">
+  <link rel="icon" type="image/png" href="app-icon.png">
+  <link rel="stylesheet" href="index.css?v=3.5.0-ui-polish-3">
   <script src="lucide.min.js"></script>
   <script src="marked.min.js"></script>
 </head>
@@ -14,7 +13,7 @@
   <div class="app-container">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-icon"><img src="app-icon.svg" alt="" aria-hidden="true"></div>
+        <div class="brand-icon"><img src="app-icon.png" alt="" aria-hidden="true"></div>
         <div class="brand-title">
           <h1>SkillHub</h1>
           <p>本地 Skill 工作台</p>
@@ -57,7 +56,7 @@
               <i data-lucide="folder-cog" aria-hidden="true"></i>
             </button>
           </div>
-          <div class="config-value" id="skills-dir-path" onclick="handleChangeSkillsDir()" title="点击选择新文件夹">加载中…</div>
+          <button type="button" class="config-value" id="skills-dir-path" onclick="handleChangeSkillsDir()" title="点击选择新文件夹">加载中…</button>
         </div>
         <div class="service-status-row">
           <span id="api-config-summary" class="service-status neutral">AI 未配置</span>
@@ -144,7 +143,7 @@
   </div>
 
   <div class="skill-drawer-backdrop" id="skill-drawer-backdrop" onclick="closeSkillDrawer()"></div>
-  <aside class="skill-detail-drawer" id="skill-detail-drawer" role="dialog" aria-modal="false" aria-labelledby="skill-detail-title" aria-hidden="true">
+  <aside class="skill-detail-drawer" id="skill-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="skill-detail-title" aria-hidden="true" inert>
     <header class="skill-detail-header">
       <div class="skill-detail-heading">
         <span class="skill-detail-emoji" id="skill-detail-emoji">📄</span>
@@ -153,7 +152,7 @@
           <h2 id="skill-detail-title">Skill</h2>
         </div>
       </div>
-      <button class="btn btn-secondary btn-icon" onclick="closeSkillDrawer()" aria-label="关闭详情">
+      <button class="btn btn-secondary btn-icon" id="skill-detail-close" onclick="closeSkillDrawer()" aria-label="关闭详情">
         <i data-lucide="x" aria-hidden="true"></i>
       </button>
     </header>
@@ -173,24 +172,21 @@
   </aside>
 
   <!-- Editor Modal -->
-  <div id="editor-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-hidden="true">
+  <div id="editor-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-hidden="true" inert>
     <div class="modal-container">
       <header class="modal-header">
         <div class="modal-title-info">
           <span class="modal-emoji" id="modal-emoji">📄</span>
           <h3 class="modal-title" id="modal-title">编辑技能</h3>
+          <span class="editor-dirty-indicator" id="editor-dirty-indicator" hidden>未保存</span>
         </div>
         <div class="modal-header-actions">
-          <div class="modal-tabs">
-            <button class="modal-tab active" id="modal-tab-edit" onclick="switchModalTab('edit')">编辑源码</button>
-            <button class="modal-tab" id="modal-tab-preview" onclick="switchModalTab('preview')">实时预览</button>
-          </div>
-          <button class="btn btn-secondary btn-icon" onclick="closeEditorModal()">
+          <button class="btn btn-secondary btn-icon modal-close-btn" onclick="closeEditorModal()" aria-label="关闭编辑器">
             <i data-lucide="x" style="width:18px;height:18px;"></i>
           </button>
         </div>
       </header>
-      <div id="editor-source-bar" class="editor-source-bar">
+      <div id="editor-source-bar" class="editor-source-bar editor-workbench-bar">
         <div class="editor-source-tabs" role="tablist" aria-label="Skill 包文件">
           <button type="button" class="editor-source-tab active" id="editor-source-skill" role="tab" aria-selected="true" onclick="switchEditorSource('skill')">
             SKILL.md
@@ -200,8 +196,12 @@
             <span id="editor-openai-state" class="editor-source-state">可选</span>
           </button>
         </div>
-        <span id="editor-source-hint">name 标识 Skill；description 参与隐式匹配；正文是选中后加载的执行指令</span>
+        <div class="modal-tabs" role="tablist" aria-label="编辑器视图">
+          <button class="modal-tab active" id="modal-tab-edit" onclick="switchModalTab('edit')">编辑</button>
+          <button class="modal-tab" id="modal-tab-preview" onclick="switchModalTab('preview')">预览</button>
+        </div>
       </div>
+      <div id="editor-source-hint" class="editor-source-hint">name 标识 Skill；description 参与隐式匹配；正文是选中后加载的执行指令</div>
       <div id="editor-openai-hint" class="editor-openai-hint" hidden>
         <i data-lucide="info" aria-hidden="true"></i>
         <div>
@@ -314,7 +314,7 @@
   </div>
 
   <!-- Skill Collection Modal -->
-  <div id="collection-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="collection-modal-title" aria-hidden="true">
+  <div id="collection-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="collection-modal-title" aria-hidden="true" inert>
     <div class="modal-container collection-modal-container">
       <header class="modal-header">
         <div class="modal-title-info">
@@ -337,7 +337,7 @@
   </div>
 
   <!-- Per-Skill Global Target Modal -->
-  <div id="global-target-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="global-target-modal-title" aria-hidden="true">
+  <div id="global-target-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="global-target-modal-title" aria-hidden="true" inert>
     <div class="modal-container global-target-modal-container">
       <header class="modal-header">
         <div class="modal-title-info">
@@ -369,7 +369,7 @@
   </div>
 
   <!-- Settings Modal -->
-  <div id="settings-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" aria-hidden="true">
+  <div id="settings-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" aria-hidden="true" inert>
     <div class="modal-container modal-settings-container">
       <header class="modal-header">
         <div class="modal-title-info">
@@ -380,10 +380,16 @@
           <i data-lucide="x"></i>
         </button>
       </header>
+      <nav class="settings-section-nav" aria-label="设置分区">
+        <button type="button" id="settings-nav-general" onclick="scrollSettingsSection('settings-section-general')">通用</button>
+        <button type="button" id="settings-nav-paths" onclick="scrollSettingsSection('settings-section-paths')">路径</button>
+        <button type="button" id="settings-nav-targets" onclick="scrollSettingsSection('settings-section-targets')">全局目标</button>
+        <button type="button" id="settings-nav-ai" onclick="scrollSettingsSection('settings-section-ai')">AI</button>
+      </nav>
       <div class="modal-body settings-body">
 
         <!-- Section 1: General Preferences -->
-        <div>
+        <div id="settings-section-general" class="settings-anchor-section">
           <div class="settings-section-header" id="settings-heading-general">通用偏好</div>
           <div class="settings-section">
             <div class="settings-field">
@@ -416,12 +422,12 @@
         </div>
 
         <!-- Section 2: Path Settings -->
-        <div>
+        <div id="settings-section-paths" class="settings-anchor-section">
           <div class="settings-section-header" id="settings-heading-paths">路径管理</div>
           <div class="settings-section">
             <div class="settings-field vertical">
               <div class="settings-field-label">
-                <span id="settings-label-skillsdir">全局技能库路径</span>
+                <label id="settings-label-skillsdir" for="settings-skills-dir">全局技能库路径</label>
                 <span class="settings-field-desc" id="settings-desc-skillsdir">存放全局技能规约 Markdown 文件的目录</span>
               </div>
               <div class="settings-field-control">
@@ -433,7 +439,7 @@
             </div>
             <div class="settings-field vertical">
               <div class="settings-field-label">
-                <span id="settings-label-scandir">项目默认扫描起点</span>
+                <label id="settings-label-scandir" for="settings-scan-dir">项目默认扫描起点</label>
                 <span class="settings-field-desc" id="settings-desc-scandir">点击"关联项目"时，默认打开的初始目录</span>
               </div>
               <div class="settings-field-control">
@@ -447,7 +453,7 @@
         </div>
 
         <!-- Section 3: Global Skill Targets -->
-        <div>
+        <div id="settings-section-targets" class="settings-anchor-section">
           <div class="settings-section-header" id="settings-heading-global-targets">默认全局目标</div>
           <div class="settings-section">
             <div class="settings-field vertical">
@@ -502,12 +508,12 @@
         </div>
 
         <!-- Section 4: AI Configuration -->
-        <div>
+        <div id="settings-section-ai" class="settings-anchor-section">
           <div class="settings-section-header" id="settings-heading-ai">AI 配置</div>
           <div class="settings-section">
             <div class="settings-field vertical">
               <div class="settings-field-label">
-                <span id="settings-label-apibase">API 接口地址 (Base URL)</span>
+                <label id="settings-label-apibase" for="settings-apibase">API 接口地址 (Base URL)</label>
                 <span class="settings-field-desc" id="settings-desc-apibase">自定义 OpenAI 兼容接口，例如：官方 https://api.deepseek.com/v1，本地 Ollama 填 http://localhost:11434/v1，SiliconFlow 填 https://api.siliconflow.cn/v1</span>
               </div>
               <div class="settings-field-control">
@@ -516,7 +522,7 @@
             </div>
             <div class="settings-field vertical">
               <div class="settings-field-label">
-                <span id="settings-label-apikey">DeepSeek API Key</span>
+                <label id="settings-label-apikey" for="settings-apikey">DeepSeek API Key</label>
                 <span class="settings-field-desc" id="settings-desc-apikey">用于 AI 搜索和生成技能内容 · <a href="https://platform.deepseek.com/api_keys" target="_blank">获取 Key</a></span>
                 <span id="api-config-status" class="config-status neutral">未配置</span>
               </div>
@@ -533,7 +539,7 @@
                 <span class="settings-field-desc" id="settings-desc-ai-import">开启后先完成本地结构、安全与多客户端兼容体检，再调用 AI 优化入口文档；导入前会显示差异并要求确认。</span>
               </div>
               <label class="switch" title="AI 优化">
-                <input type="checkbox" id="settings-ai-import-optimization">
+                <input type="checkbox" id="settings-ai-import-optimization" aria-labelledby="settings-label-ai-import">
                 <span class="slider"></span>
               </label>
             </div>
@@ -543,13 +549,13 @@
                 <span class="settings-field-desc" id="settings-desc-ai-display-translation">仅将 Skill 标题和说明发送到已配置的 AI；翻译只用于界面显示，不修改 SKILL.md。</span>
               </div>
               <label class="switch" title="双语界面说明">
-                <input type="checkbox" id="settings-ai-display-translation">
+                <input type="checkbox" id="settings-ai-display-translation" aria-labelledby="settings-label-ai-display-translation">
                 <span class="slider"></span>
               </label>
             </div>
             <div class="settings-field vertical">
               <div class="settings-field-label">
-                <span id="settings-label-aimodel">AI 模型</span>
+                <label id="settings-label-aimodel" for="settings-aimodel">AI 模型</label>
                 <span class="settings-field-desc" id="settings-desc-aimodel">输入模型名，如 deepseek-chat、deepseek-reasoner</span>
               </div>
               <div class="settings-field-control">
@@ -576,12 +582,12 @@
 
   <!-- AI Chat Modal -->
 
-  <div id="ai-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="ai-modal-title" aria-hidden="true">
+  <div id="ai-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="ai-modal-title" aria-hidden="true" inert>
     <div class="modal-container ai-modal-container">
       <!-- Session List Panel -->
       <div class="ai-session-panel" id="ai-session-panel">
         <div class="ai-session-header">
-          <span class="ai-session-title"><i data-lucide="messages-square" aria-hidden="true"></i>会话列表</span>
+          <span class="ai-session-title"><i data-lucide="messages-square" aria-hidden="true"></i><span id="ai-session-title-label">会话列表</span></span>
           <button class="btn btn-secondary btn-icon ai-session-add" onclick="handleNewSession()" title="新建会话" aria-label="新建会话">
             <i data-lucide="plus"></i>
           </button>
@@ -613,20 +619,20 @@
         <div class="ai-chat-messages" id="ai-chat-messages">
           <div class="ai-chat-empty">
             <div class="ai-empty-mark"><i data-lucide="bot" aria-hidden="true"></i></div>
-            <h4>给 SkillOps Agent 一个目标</h4>
-            <p>Agent 会自主检索、检查和生成草案；任何写入或项目同步都必须先获得你的批准。</p>
+            <h4 id="agent-empty-title">给 SkillOps Agent 一个目标</h4>
+            <p id="agent-empty-description">Agent 会自主检索、检查和生成草案；任何写入或项目同步都必须先获得你的批准。</p>
             <div class="ai-prompt-suggestions">
               <button type="button" onclick="useAISuggestion('根据当前项目技术栈，帮我生成一份代码审查 Skill')">
                 <i data-lucide="scan-search" aria-hidden="true"></i>
-                <span><strong>生成代码审查规范</strong><small>从技术栈和风险点开始</small></span>
+                <span><strong id="agent-suggestion-review">生成代码审查规范</strong><small id="agent-suggestion-review-note">从技术栈和风险点开始</small></span>
               </button>
               <button type="button" onclick="useAISuggestion('检查现有 Skill 是否有冲突、重复或不清晰的规则')">
                 <i data-lucide="list-checks" aria-hidden="true"></i>
-                <span><strong>检查现有 Skill</strong><small>发现冲突、重复和缺口</small></span>
+                <span><strong id="agent-suggestion-audit">检查现有 Skill</strong><small id="agent-suggestion-audit-note">发现冲突、重复和缺口</small></span>
               </button>
               <button type="button" onclick="useAISuggestion('帮我把项目文档整理成一份结构清晰的开发 Skill')">
                 <i data-lucide="file-input" aria-hidden="true"></i>
-                <span><strong>从文档提取规范</strong><small>整理为可复用的规则</small></span>
+                <span><strong id="agent-suggestion-extract">从文档提取规范</strong><small id="agent-suggestion-extract-note">整理为可复用的规则</small></span>
               </button>
             </div>
           </div>
@@ -635,16 +641,16 @@
         <!-- Skill Preview -->
         <div id="ai-skill-preview" style="display:none;border-top:1px solid var(--border);padding:0.75rem 1rem;max-height:35vh;overflow-y:auto;background:var(--bg-app);">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.6rem;">
-            <span style="font-size:0.72rem;font-weight:600;color:var(--text-tertiary);">📄 生成的技能预览</span>
+            <span id="ai-preview-title" style="font-size:0.72rem;font-weight:600;color:var(--text-tertiary);">📄 生成的技能预览</span>
             <div style="display:flex;gap:0.4rem;">
               <button class="btn btn-secondary btn-icon" onclick="copyGeneratedSkillPreview(this)" style="font-size:0.68rem;padding:0.25rem 0.5rem;">
-                <i data-lucide="copy" style="width:11px;height:11px;"></i> 复制
+                <i data-lucide="copy" style="width:11px;height:11px;"></i><span id="ai-preview-copy-label">复制</span>
               </button>
               <button class="btn btn-secondary btn-icon" onclick="handleAIRegenerate()" style="font-size:0.68rem;padding:0.25rem 0.5rem;">
-                <i data-lucide="refresh-cw" style="width:11px;height:11px;"></i> 重新生成
+                <i data-lucide="refresh-cw" style="width:11px;height:11px;"></i><span id="ai-preview-regenerate-label">重新生成</span>
               </button>
               <button class="btn btn-primary btn-icon" onclick="handleAISave()" style="font-size:0.68rem;padding:0.25rem 0.65rem;">
-                <i data-lucide="download" style="width:11px;height:11px;"></i> 保存
+                <i data-lucide="download" style="width:11px;height:11px;"></i><span id="ai-preview-save-label">保存</span>
               </button>
             </div>
           </div>
@@ -662,64 +668,64 @@
           </button>
         </div>
       </div>
-      <aside class="agent-activity-panel" aria-label="Agent 执行状态">
+      <aside class="agent-activity-panel" id="agent-activity-panel" aria-label="Agent 执行状态">
         <div class="agent-panel-header">
           <div>
             <span class="agent-eyebrow">AGENT RUN</span>
-            <strong>执行记录</strong>
+            <strong id="agent-activity-title">执行记录</strong>
           </div>
           <span class="agent-status-badge idle" id="agent-status-badge">空闲</span>
         </div>
         <div class="agent-phase-card">
-          <span>当前阶段</span>
+          <span id="agent-current-phase-label">当前阶段</span>
           <strong id="agent-phase">等待目标</strong>
           <small id="agent-run-id">尚未开始运行</small>
           <button class="agent-resume-button" id="agent-resume-button" onclick="resumeAgentRun()" hidden>
-            <i data-lucide="play"></i>恢复任务
+            <i data-lucide="play"></i><span id="agent-resume-label">恢复任务</span>
           </button>
         </div>
         <div class="agent-approval-card" id="agent-approval-card" hidden>
           <div class="agent-section-title">
             <i data-lucide="shield-alert" aria-hidden="true"></i>
-            <strong>等待批准</strong>
+            <strong id="agent-approval-title">等待批准</strong>
           </div>
           <p id="agent-approval-tool"></p>
           <pre id="agent-approval-arguments"></pre>
           <div class="agent-approval-actions">
             <button class="btn btn-secondary" onclick="rejectAgentAction()">
-              <i data-lucide="x"></i>拒绝
+              <i data-lucide="x"></i><span id="agent-reject-label">拒绝</span>
             </button>
             <button class="btn btn-primary" onclick="approveAgentAction()">
-              <i data-lucide="check"></i>批准并继续
+              <i data-lucide="check"></i><span id="agent-approve-label">批准并继续</span>
             </button>
           </div>
         </div>
         <section class="agent-panel-section">
           <div class="agent-section-title">
             <i data-lucide="list-tree" aria-hidden="true"></i>
-            <strong>工具时间线</strong>
+            <strong id="agent-timeline-title">工具时间线</strong>
           </div>
           <div class="agent-timeline" id="agent-timeline">
-            <div class="agent-empty-note">运行后显示计划、工具调用、观察结果、批准和错误。</div>
+            <div class="agent-empty-note" id="agent-timeline-empty">运行后显示计划、工具调用、观察结果、批准和错误。</div>
           </div>
         </section>
         <section class="agent-panel-section agent-memory-section">
           <div class="agent-section-title">
             <i data-lucide="brain" aria-hidden="true"></i>
-            <strong>相关记忆</strong>
-            <button class="agent-link-button" onclick="showAgentMemoryManager()">查看全部</button>
+            <strong id="agent-memory-title">相关记忆</strong>
+            <button class="agent-link-button" id="agent-memory-view-all" onclick="showAgentMemoryManager()">查看全部</button>
           </div>
           <div class="agent-memory-used" id="agent-memory-used">
-            <div class="agent-empty-note">本次尚未使用记忆。</div>
+            <div class="agent-empty-note" id="agent-memory-empty">本次尚未使用记忆。</div>
           </div>
           <details class="agent-memory-manager" id="agent-memory-manager">
-            <summary>记忆设置</summary>
+            <summary id="agent-memory-settings-label">记忆设置</summary>
             <label>
               <input type="checkbox" id="agent-memory-enabled" onchange="toggleAgentMemory(this.checked)" checked>
-              启用结构化记忆
+              <span id="agent-memory-enable-label">启用结构化记忆</span>
             </label>
             <button class="btn btn-secondary" onclick="clearAgentMemory()">
-              <i data-lucide="trash-2"></i>清理全部记忆
+              <i data-lucide="trash-2"></i><span id="agent-memory-clear-label">清理全部记忆</span>
             </button>
             <div id="agent-memory-overview"></div>
           </details>
@@ -728,8 +734,35 @@
     </div>
   </div>
 
+  <!-- Structured Review Modal -->
+  <div id="review-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="review-title" aria-hidden="true" inert>
+    <div class="modal-container review-modal-container">
+      <header class="modal-header review-header">
+        <div class="modal-title-info">
+          <span class="modal-title-icon" aria-hidden="true"><i data-lucide="clipboard-check"></i></span>
+          <div>
+            <span class="workspace-kicker" id="review-kicker">变更审阅</span>
+            <h3 class="modal-title" id="review-title">确认操作</h3>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-icon modal-close-btn" onclick="closeStructuredReview(false)" aria-label="关闭审阅">
+          <i data-lucide="x"></i>
+        </button>
+      </header>
+      <div class="review-summary" id="review-summary"></div>
+      <div class="modal-body review-body" id="review-body"></div>
+      <footer class="review-footer">
+        <span id="review-footnote">确认前请检查影响范围</span>
+        <div>
+          <button class="btn btn-secondary" id="review-cancel" onclick="closeStructuredReview(false)">取消</button>
+          <button class="btn btn-primary" id="review-confirm" onclick="closeStructuredReview(true)">确认继续</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
   <!-- Custom Dialog Modal (Prompt/Confirm) -->
-  <div id="dialog-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="dialog-title" aria-hidden="true">
+  <div id="dialog-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="dialog-title" aria-hidden="true" inert>
     <div class="modal-container" style="max-width: 560px; height: auto; display: flex; flex-direction: column;">
       <header class="modal-header" style="padding: 1.25rem 1.5rem;">
         <div class="modal-title-info">
@@ -754,7 +787,7 @@
     </div>
   </div>
 
-  <div id="toast-container" class="toast-container"></div>
-  <script src="app.js"></script>
+  <div id="toast-container" class="toast-container" role="status" aria-live="polite" aria-relevant="additions"></div>
+  <script src="app.js?v=3.5.0-ui-polish-3"></script>
 </body>
 </html>
