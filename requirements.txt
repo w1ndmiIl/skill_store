@@ -2,3 +2,4 @@ pywebview==6.2.1
 requests==2.34.2
 ddgs==9.14.4
 PyYAML==6.0.3
+PyInstaller==6.20.0

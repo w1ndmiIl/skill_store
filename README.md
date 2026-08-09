@@ -126,8 +126,8 @@ python main.py
 构建便携版：
 
 ```powershell
-python -m pip install pyinstaller
-pyinstaller --clean --noconfirm SkillHub.spec
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m PyInstaller --clean --noconfirm SkillHub.spec
 ```
 
 ## 仓库结构
