@@ -19,9 +19,7 @@ from skillhub.domain.naming import normalize_skill_filename
 from skillhub.infrastructure.filesystem import (
     atomic_write_json,
     atomic_write_text,
-    get_tree_sha256,
     load_json_file,
-    normalize_relative_path,
     safe_child_path,
     safe_real_child_path,
 )
@@ -32,6 +30,10 @@ class LibraryApiMixin:
 
     def get_skills(self):
         """Return list of all global skill metadata (files and directories)."""
+        return self._collect_skills(include_global_state=True)
+
+    def _collect_skills(self, *, include_global_state: bool):
+        """Collect library metadata with optional publication-state inspection."""
         skills = []
         os.makedirs(self.skills_dir, exist_ok=True)
         if os.path.exists(self.skills_dir):
@@ -59,12 +61,14 @@ class LibraryApiMixin:
                         }
                     meta["filename"] = item
                     meta["is_dir"] = True
-                    meta.update(self._codex_global_skill_state(item, fp))
+                    if include_global_state:
+                        meta.update(self._codex_global_skill_state(item, fp))
                     skills.append(meta)
                 elif os.path.isfile(fp) and item.lower().endswith(".md"):
                     meta = parse_markdown_metadata(fp)
                     meta["is_dir"] = False
-                    meta.update(self._codex_global_skill_state(item, fp))
+                    if include_global_state:
+                        meta.update(self._codex_global_skill_state(item, fp))
                     skills.append(meta)
         collections = self._load_skill_collections().get("collections", [])
         for collection in collections:
@@ -89,7 +93,8 @@ class LibraryApiMixin:
                     "virtual_source": relative_path,
                     "target_filename": os.path.basename(relative_path),
                 })
-                meta.update(self._codex_global_skill_state(virtual_id, source))
+                if include_global_state:
+                    meta.update(self._codex_global_skill_state(virtual_id, source))
                 skills.append(meta)
 
         display_localizations = self._load_display_localizations()

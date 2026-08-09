@@ -3,7 +3,6 @@
 import difflib
 import hashlib
 import os
-import time
 import uuid
 
 from agent_runtime import SENSITIVE_INLINE_RE, SENSITIVE_VALUE_RE
@@ -11,10 +10,7 @@ from agent_runtime import SENSITIVE_INLINE_RE, SENSITIVE_VALUE_RE
 from skillhub.domain.naming import normalize_skill_filename
 from skillhub.infrastructure.filesystem import (
     atomic_copy_file,
-    atomic_write_json,
     atomic_write_text,
-    get_tree_sha256,
-    load_json_file,
     safe_child_path,
 )
 from skillhub.settings import AGENT_BACKUPS_DIR

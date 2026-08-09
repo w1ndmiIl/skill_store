@@ -1,7 +1,6 @@
 """Filesystem intake and structural preparation for Skill imports."""
 
 import os
-import re
 import shutil
 import zipfile
 from pathlib import PurePosixPath
@@ -14,15 +13,13 @@ from skillhub.domain.imports import (
     SKILL_IMPORT_MAX_ENTRIES,
     SKILL_IMPORT_MAX_FILE_BYTES,
     SKILL_IMPORT_MAX_TOTAL_BYTES,
-    normalize_skillhub_markdown,
 )
 from skillhub.domain.metadata import (
     clean_frontmatter_value as _clean_frontmatter_value,
     markdown_title_and_description as _markdown_title_and_description,
 )
-from skillhub.domain.naming import normalize_relative_path, normalize_skill_filename
+from skillhub.domain.naming import normalize_skill_filename
 from skillhub.infrastructure.filesystem import (
-    atomic_copy_file,
     atomic_write_text,
     get_tree_sha256,
     is_path_reparse_point,

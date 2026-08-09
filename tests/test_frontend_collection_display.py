@@ -8,6 +8,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class FrontendCollectionDisplayTests(unittest.TestCase):
+    def test_skill_rows_do_not_schedule_redundant_stagger_timers(self):
+        source = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertNotIn("hasRenderedSkillCards", source)
+        self.assertNotIn("card.style.transitionDelay", source)
+
     def test_collection_card_does_not_inherit_first_child_display_metadata(self):
         source = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
         helper = source.split(

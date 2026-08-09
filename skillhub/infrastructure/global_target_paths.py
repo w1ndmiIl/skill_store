@@ -270,7 +270,12 @@ class GlobalTargetPathsMixin:
             for candidate in candidates
         )
 
-    def _global_target_state(self, descriptor: dict, target_id: str) -> dict:
+    def _global_target_state(
+        self,
+        descriptor: dict,
+        target_id: str,
+        source_hash_getter=None,
+    ) -> dict:
         definition = GLOBAL_SKILL_TARGETS.get(target_id, {})
         kind = definition.get("kind", "")
         state = {
@@ -287,7 +292,11 @@ class GlobalTargetPathsMixin:
             state["status"] = "invalid"
             return state
 
-        source_hash = self._codex_global_source_hash(descriptor)
+        def current_source_hash() -> str:
+            if source_hash_getter is not None:
+                return source_hash_getter()
+            return self._codex_global_source_hash(descriptor)
+
         if kind == "export":
             export_root = self._claude_desktop_export_root()
             package_path = safe_child_path(
@@ -306,7 +315,7 @@ class GlobalTargetPathsMixin:
                 return state
             manifest = load_json_file(manifest_path, {})
             state.update({"enabled": True, "status": "enabled", "managed": True})
-            if manifest.get("source_hash") != source_hash:
+            if manifest.get("source_hash") != current_source_hash():
                 state["status"] = "outdated"
             return state
 
@@ -357,7 +366,7 @@ class GlobalTargetPathsMixin:
             manifest = load_json_file(
                 os.path.join(expected_source, CODEX_ADAPTER_MANIFEST), {}
             )
-            if manifest.get("source_hash") != source_hash:
+            if manifest.get("source_hash") != current_source_hash():
                 state["status"] = "outdated"
         return state
 
@@ -381,8 +390,19 @@ class GlobalTargetPathsMixin:
         if not compatible:
             return state
 
+        source_hash = []
+
+        def current_source_hash() -> str:
+            if not source_hash:
+                source_hash.append(self._codex_global_source_hash(descriptor))
+            return source_hash[0]
+
         target_states = [
-            self._global_target_state(descriptor, target_id)
+            self._global_target_state(
+                descriptor,
+                target_id,
+                source_hash_getter=current_source_hash,
+            )
             for target_id in GLOBAL_SKILL_TARGETS
         ]
         state["global_target_states"] = target_states

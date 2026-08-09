@@ -1,6 +1,7 @@
 import ast
 import builtins
 import os
+import re
 import symtable
 import tempfile
 import unittest
@@ -13,7 +14,7 @@ from skillhub.domain import frontmatter, global_targets, naming
 from skillhub.infrastructure import filesystem
 from skillhub.infrastructure.config_repository import ConfigRepository
 from skillhub.infrastructure.global_targets import GlobalTargetService
-from skillhub.settings import get_user_data_dir
+from skillhub.settings import APP_VERSION, get_user_data_dir
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +50,15 @@ class ModularArchitectureTests(unittest.TestCase):
         self.assertIs(main.normalize_agent_skill_name, naming.normalize_agent_skill_name)
         self.assertIs(main.atomic_write_json, filesystem.atomic_write_json)
         self.assertIs(main.safe_real_child_path, filesystem.safe_real_child_path)
+
+    def test_runtime_version_matches_both_readmes(self):
+        readme_versions = []
+        for filename in ("README.md", "README_EN.md"):
+            content = (ROOT / filename).read_text(encoding="utf-8")
+            match = re.search(r"(?:当前版本：|Current version: )\*\*([^*]+)\*\*", content)
+            self.assertIsNotNone(match, filename)
+            readme_versions.append(match.group(1))
+        self.assertEqual(readme_versions, [APP_VERSION, APP_VERSION])
 
     def test_domain_layer_does_not_import_ui_network_or_infrastructure(self):
         self._assert_layer_avoids_imports(

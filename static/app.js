@@ -31,7 +31,6 @@ let globalSkillTargetOptions = [];
 let aiGeneratedSkill = null; // cached AI result
 let activeCategoryFilter = null; // active category filter (null = show all)
 let searchRenderTimer = null;
-let hasRenderedSkillCards = false;
 let activeDrawerFilename = null;
 let drawerReturnFocus = null;
 let loadedEditorCategory = '';
@@ -1517,11 +1516,10 @@ function renderSkillsGrid() {
   const detachedSkills = new Set(activeProj ? (activeProj.detached_skills || []) : []);
   const fragment = document.createDocumentFragment();
 
-  filtered.forEach((skill, index) => {
+  filtered.forEach(skill => {
     const card = document.createElement('div');
     card.className = `skill-card skill-row${skill.is_collection ? ' collection-card' : ''}${skill.project_only ? ' project-only-card' : ''}`;
     card.dataset.filename = skill.filename;
-    card.style.transitionDelay = `${index * 35}ms`;
 
     // Apply 100% Local Smart Classifier for Emojis and Tags
     const smart = getSmartEmojiAndTags(skill);
@@ -1709,17 +1707,6 @@ function renderSkillsGrid() {
   });
   cardsGrid.appendChild(fragment);
   lucide.createIcons();
-
-  // Staggered card entrance animation only on the first full render.
-  requestAnimationFrame(() => {
-    const cards = cardsGrid.querySelectorAll('.skill-card');
-    if (hasRenderedSkillCards) {
-      cards.forEach(card => card.classList.add('visible'));
-      return;
-    }
-    cards.forEach((card, i) => setTimeout(() => card.classList.add('visible'), i * 40));
-    hasRenderedSkillCards = true;
-  });
 }
 
 function globalTargetIcon(targetId) {

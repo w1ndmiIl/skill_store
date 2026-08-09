@@ -6,8 +6,6 @@ import re
 import time
 import uuid
 
-import webview
-
 from skillhub.domain.agent_index import (
     build_agents_managed_section,
     merge_agents_managed_section,
@@ -28,10 +26,7 @@ from skillhub.infrastructure.filesystem import (
     safe_real_child_path,
 )
 from skillhub.infrastructure.sync_status import (
-    SYNC_LAST_TRANSACTION_NAME,
-    SYNC_MANIFEST_NAME,
     SYNC_STATE_DIR,
-    check_dir_sync_status,
 )
 
 
