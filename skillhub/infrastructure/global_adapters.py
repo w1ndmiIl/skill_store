@@ -14,12 +14,17 @@ from skillhub.domain.frontmatter import (
 )
 from skillhub.domain.global_targets import (
     ANTIGRAVITY_FRONTMATTER_KEYS,
+    CLINE_FRONTMATTER_KEYS,
     CLAUDE_CODE_FRONTMATTER_KEYS,
     CLAUDE_UPLOAD_FRONTMATTER_KEYS,
     CODEX_ADAPTER_MANIFEST,
     CODEX_FRONTMATTER_KEYS,
+    CURSOR_FRONTMATTER_KEYS,
+    FORCE_PORTABLE_NAME_TARGETS,
     GEMINI_FRONTMATTER_KEYS,
+    OPENCODE_FRONTMATTER_KEYS,
     VSCODE_FRONTMATTER_KEYS,
+    WINDSURF_FRONTMATTER_KEYS,
 )
 from skillhub.domain.metadata import infer_skill_metadata
 from skillhub.domain.naming import AGENT_SKILL_NAME_RE
@@ -132,13 +137,17 @@ class GlobalAdaptersMixin:
             allowed_keys = {
                 "codex": CODEX_FRONTMATTER_KEYS,
                 "claude_code": CLAUDE_CODE_FRONTMATTER_KEYS,
+                "cursor": CURSOR_FRONTMATTER_KEYS,
+                "cline": CLINE_FRONTMATTER_KEYS,
+                "opencode": OPENCODE_FRONTMATTER_KEYS,
+                "windsurf": WINDSURF_FRONTMATTER_KEYS,
                 "antigravity": ANTIGRAVITY_FRONTMATTER_KEYS,
                 "gemini_cli": GEMINI_FRONTMATTER_KEYS,
                 "vscode": VSCODE_FRONTMATTER_KEYS,
                 "claude_desktop": CLAUDE_UPLOAD_FRONTMATTER_KEYS,
             }.get(target_id, CODEX_FRONTMATTER_KEYS)
             forced_name = ""
-            if target_id in {"vscode", "claude_desktop"}:
+            if target_id in FORCE_PORTABLE_NAME_TARGETS:
                 forced_name = self._global_target_entry_name(
                     descriptor, target_id
                 )
@@ -180,7 +189,11 @@ class GlobalAdaptersMixin:
 
     def _create_codex_global_link(self, source: str, target: str):
         """Create a directory link without copying Skill contents onto the C drive."""
-        os.makedirs(os.path.dirname(target), exist_ok=True)
+        parent = os.path.dirname(target)
+        if not parent or not os.path.isdir(parent):
+            raise OSError(
+                "Agent Skill directory does not exist; SkillHub will not create it"
+            )
         if os.name == "nt":
             completed = subprocess.run(
                 [

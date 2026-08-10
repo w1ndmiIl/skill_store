@@ -61,6 +61,18 @@ class GlobalTargetService(GlobalTargetPathsMixin, GlobalAdaptersMixin):
                 ),
                 "target": target_state,
             }
+        if (
+            enabled
+            and target_state["kind"] == "link"
+            and not target_state.get("available", False)
+        ):
+            return {
+                "error": (
+                    f'{target_state["label"]} Skill directory was not detected; '
+                    "SkillHub will not create it automatically"
+                ),
+                "target": target_state,
+            }
         try:
             if enabled and target_state["kind"] == "link":
                 self._write_codex_standard_adapter(descriptor, target_id)
@@ -179,7 +191,21 @@ class GlobalTargetService(GlobalTargetPathsMixin, GlobalAdaptersMixin):
         if not initial_state["codex_global_compatible"]:
             return {"error": "This entry cannot be adapted to a Codex Skill"}
         changed_targets = []
-        for target_id in self._configured_global_target_ids():
+        target_ids = self._configured_global_target_ids()
+        if enabled:
+            target_ids = [
+                target_id for target_id in target_ids
+                if self._global_skill_target_available(target_id)
+            ]
+            if not target_ids:
+                return {
+                    "error": (
+                        "No configured Agent Skill directory was detected; "
+                        "SkillHub will not create one automatically"
+                    ),
+                    **initial_state,
+                }
+        for target_id in target_ids:
             result = self._set_global_skill_target(
                 filename, bool(enabled), target_id, source, descriptor
             )

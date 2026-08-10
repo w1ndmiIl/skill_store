@@ -2,7 +2,7 @@
 
 [中文](README.md) · [User manual](docs/SkillHub使用说明书.md) · [Download the latest release](https://github.com/w1ndwill/skill_store/releases/latest) · [MIT License](LICENSE)
 
-SkillHub is a local AI Skill management and synchronization tool. It keeps reusable development rules, workflows, and specialist capabilities in one place, then applies them selectively to projects or clients such as Codex, Claude Code, Antigravity, Gemini CLI, and VS Code/Copilot. Current version: **3.5.0**.
+SkillHub is a local AI Skill management and synchronization tool. It keeps reusable development rules, workflows, and specialist capabilities in one place, then applies them selectively to projects or clients such as Codex, Claude Code, Cursor, Cline, OpenCode, Windsurf, Gemini CLI, and VS Code/Copilot. Current version: **3.5.0**.
 
 Users can review changes, conflicts, and scope overlaps before a write and safely roll back afterward. Import inspection and display localization do not rewrite the original semantics of third-party Skills. SkillOps Agent is optional assistance for finding, inspecting, and maintaining Skills; it does not replace manual management or approval.
 
@@ -51,7 +51,7 @@ Standard Skill folders expose both `SKILL.md` and `agents/openai.yaml`. The Open
 
 ![English project Skill configuration](docs/screenshots/en/project-configuration.png)
 
-Each project selects its own Skills. The view combines source descriptions, categories, sync status, and enablement controls. A bottom action bar summarizes pending changes and opens a preview before writing. Every executable library Skill can independently target Codex, Claude Code, Antigravity, Gemini CLI, VS Code, or Claude Desktop without binding it to a project.
+Each project selects its own Skills. The view combines source descriptions, categories, sync status, and enablement controls. A bottom action bar summarizes pending changes and opens a preview before writing. Every executable library Skill can independently target Codex, Claude Code, Cursor, Cline, OpenCode, Windsurf, Antigravity, Gemini CLI, VS Code, or Claude Desktop without binding it to a project.
 
 ![Per-Skill global target selection in English](docs/screenshots/en/global-target-selection.png)
 
@@ -74,9 +74,9 @@ Generated project content lives at:
 | --- | --- |
 | Global Skill library | Manage Markdown guidance, standard `SKILL.md` folders, and Skill collections |
 | Skill usage configuration | Visually edit `agents/openai.yaml` interface metadata, invocation policy, and tool dependencies with an advanced YAML mode |
-| Multi-client global enablement | Choose Codex, Claude Code, Antigravity, Gemini CLI, VS Code/Copilot, or Claude Desktop independently for each Skill; publishing creates a client-specific view without rewriting the source Skill |
+| Multi-client global enablement | Choose Codex, Claude Code, Cursor, Cline, OpenCode, Windsurf, Antigravity, Gemini CLI, VS Code/Copilot, or Claude Desktop independently for each Skill; publishing creates a client-specific view without rewriting the source Skill |
 | Claude Desktop export | Build a correctly structured upload ZIP; Claude Desktop still requires manual upload from `Customize > Skills` because it does not watch a local Skill directory |
-| Import inspection | Locally detect duplicates, same-name conflicts, risky entries, path issues, and compatibility across six clients; Claude tool pre-approval receives a separate warning |
+| Import inspection | Locally detect duplicates, same-name conflicts, risky entries, path issues, and compatibility across ten clients; Claude tool pre-approval receives a separate warning |
 | Bilingual descriptions | Use display-only localization without rewriting third-party `SKILL.md` |
 | Project synchronization | Preview additions, updates, removals, file conflicts, and global/project scope overlaps before writing |
 | Sync rollback | Undo the most recent sync when affected project files have not changed again |

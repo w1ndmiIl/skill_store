@@ -42,12 +42,16 @@ SkillHub 的主要能力包括全局 Skill 管理、文件与仓库导入、集�
 | --- | --- | --- |
 | Codex | `%CODEX_HOME%\skills\`（默认 `%USERPROFILE%\.codex\skills\`） | 目录联接 |
 | Claude Code | `%USERPROFILE%\.claude\skills\` | 目录联接 |
+| Cursor | `%USERPROFILE%\.cursor\skills\` | 目录联接 |
+| Cline | `%USERPROFILE%\.cline\skills\` | 目录联接 |
+| OpenCode | `%USERPROFILE%\.config\opencode\skills\` | 目录联接 |
+| Windsurf | `%USERPROFILE%\.codeium\windsurf\skills\` | 目录联接 |
 | Antigravity | `%USERPROFILE%\.gemini\config\skills\` | 目录联接 |
 | Gemini CLI | `%USERPROFILE%\.gemini\skills\` | 目录联接 |
 | VS Code / Copilot | `%USERPROFILE%\.copilot\skills\` | 目录联接 |
 | Claude Desktop | `.skill-hub\exports\claude-desktop\` | 生成 ZIP 后，在 Claude 的 `Customize > Skills` 中手动上传 |
 
-VS Code 也可能发现 `~/.agents/skills` 和 `~/.claude/skills`。同时选择多个客户端目标时，同一个 Skill 可能被 VS Code 从多个位置发现；需要完全避免重复时，只选择其中一个 VS Code 能读取的目录即可。
+首批扩展目标按公开采用度信号依次纳入 Cursor、Cline、OpenCode、Windsurf；安装量、用户量和 GitHub Stars 的统计口径并不相同，因此这里只用于确定接入优先级，不作为精确用户排名。部分客户端还会兼容发现 `~/.agents/skills`、`~/.claude/skills` 或 `~/.codex/skills`。同时选择多个重叠目标时可能显示同名 Skill；需要完全避免重复时，只选择该 Agent 的一个可发现目录。
 
 全局范围与项目范围彼此独立。若同一个 Skill 已发布到任一目录型全局目标，又在项目中被选中，SkillHub 会在项目同步预览中报告“作用域重叠”并要求明确确认。SkillHub 不会自动关闭全局入口，因为这会影响其他项目；也不会静默跳过项目版本。对于 Codex，同名 Skill 不会自动合并，完全避免重复时应在该 Agent 上只保留一个作用域。
 
@@ -312,7 +316,7 @@ collection\
 - Bundle 路径冲突；
 - ZIP 路径穿越或符号链接。
 
-多客户端兼容检查也完全在本地完成，不会把 Skill 正文发送给任何模型。它会分别判断 Codex、Claude Code、Antigravity、Gemini CLI、VS Code / Copilot 和 Claude Desktop 的目录、`SKILL.md` 元数据、上传包大小与权限字段要求。显示“由 SkillHub 适配”表示发布时会生成目标客户端专用副本；源 Skill 的 frontmatter、正文和资源不会因此改变。Claude Code 的 `allowed-tools` 会单独提示审阅，因为它可能影响调用轮次中的工具确认行为。
+多客户端兼容检查也完全在本地完成，不会把 Skill 正文发送给任何模型。它会分别判断 Codex、Claude Code、Cursor、Cline、OpenCode、Windsurf、Antigravity、Gemini CLI、VS Code / Copilot 和 Claude Desktop 的目录、`SKILL.md` 元数据、上传包大小与权限字段要求。显示“由 SkillHub 适配”表示发布时会生成目标客户端专用副本；源 Skill 的 frontmatter、正文和资源不会因此改变。Claude Code 的 `allowed-tools` 会单独提示审阅，因为它可能影响调用轮次中的工具确认行为。
 
 高风险提示需要单独确认。确认只表示允许导入，不代表其中的命令已经安全；仍应查看正文和适用边界。
 

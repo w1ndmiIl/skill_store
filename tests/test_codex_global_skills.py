@@ -67,6 +67,96 @@ Never change this instruction.
                 os.path.normcase(os.path.abspath("D:/CodexHome/skills")),
             )
 
+    def test_popular_agent_targets_use_documented_user_directories(self):
+        api = self.make_api(Path("D:/unused"))
+        expected = {
+            "cursor": (".cursor", "skills"),
+            "cline": (".cline", "skills"),
+            "opencode": (".config", "opencode", "skills"),
+            "windsurf": (".codeium", "windsurf", "skills"),
+        }
+        with mock.patch("os.path.expanduser", return_value="D:/Users/example"):
+            actual = {
+                target_id: api._global_skill_target_dir(target_id)
+                for target_id in expected
+            }
+
+        for target_id, path_parts in expected.items():
+            with self.subTest(target=target_id):
+                self.assertEqual(
+                    os.path.normcase(actual[target_id]),
+                    os.path.normcase(
+                        os.path.join("D:/Users/example", *path_parts)
+                    ),
+                )
+
+        additions = [
+            target_id for target_id in main.GLOBAL_SKILL_TARGETS
+            if target_id in expected
+        ]
+        self.assertEqual(
+            additions, ["cursor", "cline", "opencode", "windsurf"]
+        )
+
+    def test_missing_agent_skill_directories_are_reported_without_creation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            home.mkdir()
+            api = self.make_api(Path(temporary) / "library")
+
+            with mock.patch("os.path.expanduser", return_value=str(home)):
+                options = {
+                    option["id"]: option
+                    for option in api._global_skill_target_options()
+                }
+
+            for target_id in ("cursor", "cline", "opencode", "windsurf"):
+                with self.subTest(target=target_id):
+                    self.assertFalse(options[target_id]["available"])
+                    self.assertFalse(Path(options[target_id]["path"]).exists())
+            self.assertEqual(list(home.iterdir()), [])
+
+    def test_enable_refuses_missing_agent_directory_without_creating_it(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            skills = root / "skills"
+            skill = skills / "sample-skill"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                "---\nname: sample-skill\ndescription: Stable behavior.\n---\n",
+                encoding="utf-8",
+            )
+            api = self.make_api(skills)
+            missing_target = root / "missing-cursor" / "skills"
+            api._global_skill_target_dir_overrides = {
+                target_id: str(root / f"missing-{target_id}" / "skills")
+                for target_id, definition in main.GLOBAL_SKILL_TARGETS.items()
+                if definition["kind"] == "link"
+            }
+            api._global_skill_target_dir_overrides["cursor"] = str(missing_target)
+
+            result = api.set_skill_global_targets("sample-skill", ["cursor"])
+
+            self.assertIn("will not create", result.get("error", ""))
+            self.assertEqual(result.get("failed_target"), "cursor")
+            self.assertFalse((root / "missing-cursor").exists())
+            self.assertFalse(
+                (skills / ".skill-hub" / "cursor-standard").exists()
+            )
+
+    def test_link_creation_requires_an_existing_agent_skill_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            api = self.make_api(root / "library")
+            target = root / "missing-agent" / "skills" / "sample-skill"
+
+            with self.assertRaisesRegex(OSError, "will not create"):
+                api._create_codex_global_link(str(source), str(target))
+
+            self.assertFalse((root / "missing-agent").exists())
+
     def test_standard_adapter_copies_resources_without_mutating_source(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -159,6 +249,71 @@ Keep this body unchanged.
             self.assertEqual(body, source_body)
             self.assertEqual(tree_hash(skill), before_hash)
 
+    def test_popular_agent_adapters_use_independent_frontmatter_allowlists(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            skills = root / "skills"
+            skill = skills / "legacy-folder"
+            (skill / "references").mkdir(parents=True)
+            source_content = """---
+name: portable-skill
+description: Preserve the original workflow.
+paths:
+  - "**/*.py"
+disable-model-invocation: true
+license: MIT
+compatibility: Requires Python.
+metadata:
+  owner: example
+allowed-tools: Read
+category: display-only
+---
+
+# Workflow
+
+Keep this body unchanged.
+"""
+            (skill / "SKILL.md").write_text(source_content, encoding="utf-8")
+            (skill / "references" / "rules.md").write_text(
+                "unchanged resource", encoding="utf-8"
+            )
+            api = self.make_api(skills)
+            descriptor = api._codex_global_skill_descriptor("legacy-folder")
+            before_hash = tree_hash(skill)
+            allowed_by_target = {
+                "cursor": main.CURSOR_FRONTMATTER_KEYS,
+                "cline": main.CLINE_FRONTMATTER_KEYS,
+                "opencode": main.OPENCODE_FRONTMATTER_KEYS,
+                "windsurf": main.WINDSURF_FRONTMATTER_KEYS,
+            }
+            _source_frontmatter, source_body, _ = (
+                main.split_markdown_frontmatter_source(source_content)
+            )
+
+            for target_id, allowed_keys in allowed_by_target.items():
+                with self.subTest(target=target_id):
+                    api._write_codex_standard_adapter(descriptor, target_id)
+                    adapter = Path(
+                        descriptor["target_adapter_paths"][target_id]
+                    )
+                    rendered = (adapter / "SKILL.md").read_text(encoding="utf-8")
+                    frontmatter, body, _ = (
+                        main.split_markdown_frontmatter_source(rendered)
+                    )
+                    parsed = main.yaml.safe_load(frontmatter)
+                    self.assertEqual(adapter.name, "portable-skill")
+                    self.assertEqual(parsed["name"], "portable-skill")
+                    self.assertFalse(set(parsed) - allowed_keys)
+                    self.assertEqual(body, source_body)
+                    self.assertEqual(
+                        (adapter / "references" / "rules.md").read_text(
+                            encoding="utf-8"
+                        ),
+                        "unchanged resource",
+                    )
+
+            self.assertEqual(tree_hash(skill), before_hash)
+
     def test_claude_desktop_export_strips_client_only_fields_from_upload_view(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -226,6 +381,10 @@ allowed-tools:
         self.assertEqual(result["targets"]["codex"]["status"], "ready")
         self.assertEqual(result["targets"]["vscode"]["status"], "adapted")
         self.assertEqual(result["targets"]["claude_code"]["status"], "warning")
+        self.assertEqual(result["targets"]["cursor"]["status"], "adapted")
+        self.assertEqual(result["targets"]["cline"]["status"], "adapted")
+        self.assertEqual(result["targets"]["opencode"]["status"], "adapted")
+        self.assertEqual(result["targets"]["windsurf"]["status"], "adapted")
         self.assertEqual(result["targets"]["claude_desktop"]["status"], "adapted")
         self.assertIn(
             "claude_allowed_tools",
@@ -329,6 +488,7 @@ allowed-tools:
                 "codex": str(codex_target)
             }
             api._legacy_codex_global_skills_dir_override = str(legacy_target)
+            codex_target.mkdir(parents=True)
             legacy_target.mkdir(parents=True)
             api._create_codex_global_link(
                 str(skill), str(legacy_target / "sample-skill")

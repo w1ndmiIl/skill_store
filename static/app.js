@@ -819,8 +819,8 @@ function applyLanguage(lang) {
     ? '导出 ZIP，需在 Claude 中上传'
     : 'Export ZIP; upload it in Claude';
   document.querySelector('#settings-global-target-note span').textContent = lang === 'zh'
-    ? 'VS Code 也会读取 Codex 与 Claude Code 的个人目录；同时选择时可能显示同名 Skill。Claude Desktop 无本地监听目录，只能生成上传包。'
-    : 'VS Code also reads Codex and Claude Code personal folders, so selecting both can expose duplicate names. Claude Desktop requires an upload package.';
+    ? '未检测到现有 Skill 目录的客户端会被禁用，SkillHub 不会替它创建路径。Claude Desktop 无本地监听目录，只生成上传包。'
+    : 'Clients without an existing Skill directory are disabled, and SkillHub will not create their paths. Claude Desktop only exports an upload package.';
   document.getElementById('settings-btn-cancel').textContent = t.settingsCancel;
   document.getElementById('settings-btn-save').innerHTML = `<i data-lucide="save" style="width:16px;height:16px;"></i> ${t.settingsSave}`;
 
@@ -1815,6 +1815,10 @@ function globalTargetIcon(targetId) {
   return {
     codex: 'square-terminal',
     claude_code: 'braces',
+    cursor: 'mouse-pointer-2',
+    cline: 'bot',
+    opencode: 'terminal',
+    windsurf: 'waves',
     antigravity: 'orbit',
     vscode: 'code-2',
     claude_desktop: 'package',
@@ -1822,6 +1826,9 @@ function globalTargetIcon(targetId) {
 }
 
 function globalTargetStateLabel(target) {
+  if (target.available === false || target.status === 'unavailable') {
+    return currentLanguage === 'zh' ? '未检测到' : 'Not detected';
+  }
   if (target.status === 'conflict') return currentLanguage === 'zh' ? '名称冲突' : 'Conflict';
   if (target.status === 'outdated') return currentLanguage === 'zh' ? '需要更新' : 'Update needed';
   if (target.status === 'partial') return currentLanguage === 'zh' ? '部分成员' : 'Some members';
@@ -1841,8 +1848,8 @@ function openGlobalTargetModal(skill) {
     : 'Choose global targets';
   document.getElementById('global-target-modal-subtitle').textContent = title;
   document.getElementById('global-target-modal-intro').textContent = currentLanguage === 'zh'
-    ? '这个 Skill 可以独立选择要同步到的 Agent；设置页中的选择只作为首次启用的默认值。'
-    : 'Choose the agents for this Skill. Settings only supplies defaults for its first enablement.';
+    ? '这个 Skill 可以独立选择要同步到的 Agent；未检测到现有 Skill 目录的客户端不可选择，也不会自动创建目录。'
+    : 'Choose the agents for this Skill. Clients without an existing Skill directory cannot be selected, and their directories will not be created.';
   document.getElementById('global-target-modal-note').textContent = currentLanguage === 'zh'
     ? '不勾选任何目标将移除这个 Skill 的全部全局入口。Claude Desktop 选项只生成上传 ZIP，不代表已经上传到账号。'
     : 'Selecting no targets removes every managed global entry for this Skill. Claude Desktop only exports an upload ZIP.';
@@ -1859,19 +1866,23 @@ function openGlobalTargetModal(skill) {
       ? (target.enabled || target.status === 'partial')
       : globalSkillTargets.includes(option.id);
     const conflict = target.status === 'conflict';
+    const unavailable = option.available === false
+      || target.available === false
+      || target.status === 'unavailable';
+    const blocked = conflict || unavailable;
     const secondary = option.requires_manual_install
       ? (currentLanguage === 'zh' ? '生成 Claude 上传 ZIP' : 'Create Claude upload ZIP')
       : option.path;
     return `
-      <label class="global-target-option ${conflict ? 'conflict' : ''}" data-target="${escapeHtml(option.id)}">
-        <input type="checkbox" value="${escapeHtml(option.id)}" ${selected && !conflict ? 'checked' : ''} ${conflict ? 'disabled' : ''}>
+      <label class="global-target-option ${conflict ? 'conflict' : ''} ${unavailable ? 'unavailable' : ''}" data-target="${escapeHtml(option.id)}" aria-disabled="${blocked ? 'true' : 'false'}">
+        <input type="checkbox" value="${escapeHtml(option.id)}" ${selected && !blocked ? 'checked' : ''} ${blocked ? 'disabled' : ''}>
         <span class="global-target-icon"><i data-lucide="${globalTargetIcon(option.id)}"></i></span>
         <span class="global-target-copy">
           <strong>${escapeHtml(option.label)}</strong>
           <small title="${escapeHtml(secondary)}">${escapeHtml(secondary)}</small>
           <span class="global-target-state ${escapeHtml(target.status || 'disabled')}">${escapeHtml(globalTargetStateLabel(target))}</span>
         </span>
-        <span class="global-target-check"><i data-lucide="${conflict ? 'triangle-alert' : 'check'}"></i></span>
+        <span class="global-target-check"><i data-lucide="${conflict ? 'triangle-alert' : unavailable ? 'circle-off' : 'check'}"></i></span>
       </label>`;
   }).join('');
   activateModal(globalTargetModal, skillGlobalTargets.querySelector('input:not([disabled])'));
@@ -3781,10 +3792,18 @@ function syncGlobalTargetSettings() {
     const targetId = option.dataset.target;
     const input = option.querySelector('input[type="checkbox"]');
     const target = globalSkillTargetOptions.find(item => item.id === targetId);
-    if (input) input.checked = globalSkillTargets.includes(targetId);
+    const available = !target || target.available !== false;
+    if (input) {
+      input.checked = available && globalSkillTargets.includes(targetId);
+      input.disabled = !available;
+    }
+    option.classList.toggle('unavailable', !available);
+    option.setAttribute('aria-disabled', available ? 'false' : 'true');
     const path = option.querySelector('.global-target-copy small');
     if (path && target && !target.requires_manual_install) {
-      path.textContent = target.path;
+      path.textContent = available
+        ? target.path
+        : `${target.path} · ${currentLanguage === 'zh' ? '未检测到' : 'Not detected'}`;
       path.title = target.path;
     }
   });

@@ -13,6 +13,26 @@ GLOBAL_SKILL_TARGETS = {
         "kind": "link",
         "path_parts": (".claude", "skills"),
     },
+    "cursor": {
+        "label": "Cursor",
+        "kind": "link",
+        "path_parts": (".cursor", "skills"),
+    },
+    "cline": {
+        "label": "Cline",
+        "kind": "link",
+        "path_parts": (".cline", "skills"),
+    },
+    "opencode": {
+        "label": "OpenCode",
+        "kind": "link",
+        "path_parts": (".config", "opencode", "skills"),
+    },
+    "windsurf": {
+        "label": "Windsurf",
+        "kind": "link",
+        "path_parts": (".codeium", "windsurf", "skills"),
+    },
     "antigravity": {
         "label": "Antigravity",
         "kind": "link",
@@ -50,6 +70,13 @@ VSCODE_FRONTMATTER_KEYS = {
     "disable-model-invocation",
     "context",
 }
+CURSOR_FRONTMATTER_KEYS = {
+    "name",
+    "description",
+    "paths",
+    "disable-model-invocation",
+    "metadata",
+}
 CLAUDE_CODE_FRONTMATTER_KEYS = {
     "name",
     "description",
@@ -62,9 +89,26 @@ CLAUDE_CODE_FRONTMATTER_KEYS = {
     "agent",
     "hooks",
 }
+OPENCODE_FRONTMATTER_KEYS = {
+    "name",
+    "description",
+    "license",
+    "compatibility",
+    "metadata",
+}
+CLINE_FRONTMATTER_KEYS = {"name", "description"}
+WINDSURF_FRONTMATTER_KEYS = {"name", "description"}
 GEMINI_FRONTMATTER_KEYS = {"name", "description"}
 ANTIGRAVITY_FRONTMATTER_KEYS = {"name", "description"}
 CLAUDE_UPLOAD_FRONTMATTER_KEYS = {"name", "description"}
+FORCE_PORTABLE_NAME_TARGETS = {
+    "vscode",
+    "claude_desktop",
+    "cursor",
+    "cline",
+    "opencode",
+    "windsurf",
+}
 
 
 def normalize_global_skill_targets(targets) -> list:

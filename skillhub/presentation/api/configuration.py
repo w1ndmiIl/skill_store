@@ -4,7 +4,10 @@ import os
 
 import webview
 
-from skillhub.domain.global_targets import DEFAULT_GLOBAL_SKILL_TARGETS
+from skillhub.domain.global_targets import (
+    DEFAULT_GLOBAL_SKILL_TARGETS,
+    GLOBAL_SKILL_TARGETS,
+)
 from skillhub.infrastructure.config_repository import ConfigRepository
 from skillhub.settings import (
     APP_DIR,
@@ -135,6 +138,21 @@ class ConfigurationApiMixin:
             )
             if not targets:
                 return {"error": "Select at least one global Skill target"}
+            unavailable = [
+                target_id for target_id in targets
+                if not self._global_skill_target_available(target_id)
+            ]
+            if unavailable:
+                labels = ", ".join(
+                    GLOBAL_SKILL_TARGETS[target_id]["label"]
+                    for target_id in unavailable
+                )
+                return {
+                    "error": (
+                        f"Agent Skill directories were not detected for: {labels}. "
+                        "SkillHub will not create them automatically"
+                    )
+                }
             self.global_skill_targets = targets
 
         self._save_config()

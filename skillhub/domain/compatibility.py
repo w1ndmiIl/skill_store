@@ -8,12 +8,18 @@ from skillhub.domain.frontmatter import (
 )
 from skillhub.domain.global_targets import (
     ANTIGRAVITY_FRONTMATTER_KEYS,
+    CLINE_FRONTMATTER_KEYS,
     CLAUDE_CODE_FRONTMATTER_KEYS,
     CLAUDE_UPLOAD_FRONTMATTER_KEYS,
     CODEX_FRONTMATTER_KEYS,
+    CURSOR_FRONTMATTER_KEYS,
     GEMINI_FRONTMATTER_KEYS,
+    OPENCODE_FRONTMATTER_KEYS,
+    WINDSURF_FRONTMATTER_KEYS,
 )
 from skillhub.domain.naming import AGENT_SKILL_NAME_RE, normalize_agent_skill_name
+
+
 def build_codex_skill_view(
     content: str,
     fallback_name: str,
@@ -100,6 +106,59 @@ def inspect_agent_skill_compatibility(
             "detail_zh": "保留 Claude Code 调用控制和工具权限字段。",
             "detail_en": "Preserves Claude Code invocation controls and tool permission fields.",
             "target_name": entry_name,
+        },
+        "cursor": {
+            "label": "Cursor",
+            "status": (
+                "ready" if valid_name and name == entry_name
+                and valid_description
+                and top_level_keys <= CURSOR_FRONTMATTER_KEYS else "adapted"
+            ),
+            "detail_zh": "Cursor 视图保留路径范围和手动调用控制，并保证目录名与 name 一致。",
+            "detail_en": (
+                "Preserves path scoping and manual invocation controls while "
+                "matching the folder name to name."
+            ),
+            "target_name": portable_name,
+        },
+        "cline": {
+            "label": "Cline",
+            "status": (
+                "ready" if valid_name and name == entry_name
+                and valid_description
+                and top_level_keys <= CLINE_FRONTMATTER_KEYS else "adapted"
+            ),
+            "detail_zh": "Cline 视图仅保留必需的 name、description、正文与资源。",
+            "detail_en": (
+                "Keeps only the required name, description, body, and resources."
+            ),
+            "target_name": portable_name,
+        },
+        "opencode": {
+            "label": "OpenCode",
+            "status": (
+                "ready" if valid_name and name == entry_name
+                and valid_description
+                and top_level_keys <= OPENCODE_FRONTMATTER_KEYS else "adapted"
+            ),
+            "detail_zh": "OpenCode 视图保留标准许可、兼容性和 metadata 字段。",
+            "detail_en": (
+                "Preserves the supported license, compatibility, and metadata fields."
+            ),
+            "target_name": portable_name,
+        },
+        "windsurf": {
+            "label": "Windsurf",
+            "status": (
+                "ready" if valid_name and name == entry_name
+                and valid_description
+                and top_level_keys <= WINDSURF_FRONTMATTER_KEYS else "adapted"
+            ),
+            "detail_zh": "Windsurf 视图仅保留发现所需字段，正文与配套资源保持不变。",
+            "detail_en": (
+                "Keeps discovery fields only while preserving the body and resources."
+            ),
+            "target_name": portable_name,
         },
         "antigravity": {
             "label": "Antigravity",

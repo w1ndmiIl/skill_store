@@ -79,6 +79,20 @@ class FrontendUiQualityTests(unittest.TestCase):
         self.assertIn("editorSourceSkill.parentElement.hidden = true", JS)
         self.assertIn("editorSourceBar.hidden = false", JS)
 
+    def test_popular_agent_targets_are_available_in_settings_and_modal_icons(self):
+        for target_id in ("cursor", "cline", "opencode", "windsurf"):
+            self.assertIn(f'data-target="{target_id}"', HTML)
+            self.assertIn(f'value="{target_id}"', HTML)
+            self.assertIn(f"{target_id}:", JS)
+
+    def test_missing_agent_targets_are_disabled_without_directory_creation(self):
+        self.assertIn("target.available === false", JS)
+        self.assertIn("target.status === 'unavailable'", JS)
+        self.assertIn("SkillHub will not create it automatically", (
+            ROOT / "skillhub" / "infrastructure" / "global_targets.py"
+        ).read_text(encoding="utf-8"))
+        self.assertIn(".global-target-option.unavailable", CSS)
+
 
 if __name__ == "__main__":
     unittest.main()

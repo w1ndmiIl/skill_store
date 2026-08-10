@@ -1208,6 +1208,9 @@ body.dark-theme .global-target-icon{border-color:var(--border)}
 .global-target-modal-intro{font-size:.75rem;line-height:1.5;color:var(--text-secondary);margin:0}
 .global-target-option.conflict{opacity:.66;cursor:not-allowed;background:var(--rose-soft)}
 .global-target-option.conflict .global-target-check{color:var(--rose);border-color:var(--rose)}
+.global-target-option.unavailable{opacity:.58;cursor:not-allowed;background:var(--bg-active)}
+.global-target-option.unavailable:hover{border-color:var(--border-light);background:var(--bg-active)}
+.global-target-option.unavailable .global-target-check{color:var(--text-tertiary)}
 .global-target-state{
   display:inline-flex;align-self:flex-start;padding:.1rem .35rem;border-radius:999px;
   font-size:.56rem;font-weight:650;color:var(--text-tertiary);background:var(--bg-active);
@@ -1215,6 +1218,7 @@ body.dark-theme .global-target-icon{border-color:var(--border)}
 .global-target-state.enabled{color:var(--green);background:var(--green-soft)}
 .global-target-state.outdated{color:var(--amber);background:var(--amber-soft)}
 .global-target-state.conflict{color:var(--rose);background:var(--rose-soft)}
+.global-target-state.unavailable{color:var(--text-tertiary);background:var(--bg-active)}
 
 /* Folder picker & test connection buttons in settings */
 .settings-folder-btn{

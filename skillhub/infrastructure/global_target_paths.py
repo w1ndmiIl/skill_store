@@ -8,6 +8,7 @@ from skillhub.domain.frontmatter import split_markdown_frontmatter
 from skillhub.domain.global_targets import (
     CODEX_ADAPTER_MANIFEST,
     DEFAULT_GLOBAL_SKILL_TARGETS,
+    FORCE_PORTABLE_NAME_TARGETS,
     GLOBAL_SKILL_TARGETS,
     SKILL_LIBRARY_STATE_DIR,
     normalize_global_skill_targets,
@@ -57,6 +58,20 @@ class GlobalTargetPathsMixin:
             os.path.expanduser("~"), *definition.get("path_parts", ())
         )
 
+    def _global_skill_target_available(self, target_id: str) -> bool:
+        """Return whether a client-owned Skill directory already exists.
+
+        SkillHub may add managed entries inside a detected client directory, but
+        it must not manufacture that directory for a client that is not present.
+        Export-only targets remain available because they do not write into a
+        client-owned path.
+        """
+        definition = GLOBAL_SKILL_TARGETS.get(target_id, {})
+        if definition.get("kind") == "export":
+            return True
+        target_dir = self._global_skill_target_dir(target_id)
+        return bool(target_dir and os.path.isdir(target_dir))
+
     def _legacy_codex_global_skills_dir(self) -> str:
         """Return the pre-3.3.2 SkillHub Codex target for safe migration."""
         override = getattr(self, "_legacy_codex_global_skills_dir_override", "")
@@ -80,6 +95,7 @@ class GlobalTargetPathsMixin:
                 "id": target_id,
                 "label": definition["label"],
                 "kind": kind,
+                "available": self._global_skill_target_available(target_id),
                 "path": (
                     self._global_skill_target_dir(target_id)
                     if kind == "link"
@@ -163,8 +179,8 @@ class GlobalTargetPathsMixin:
                     entry_name,
                 )
                 target_entry_names = {
-                    "vscode": portable_name,
-                    "claude_desktop": portable_name,
+                    target_id: portable_name
+                    for target_id in FORCE_PORTABLE_NAME_TARGETS
                 }
                 target_adapter_paths = {
                     target_id: safe_real_child_path(
@@ -221,8 +237,8 @@ class GlobalTargetPathsMixin:
             "codex_link_source": target_adapter_paths["codex"],
             "codex_adapted": True,
             "target_entry_names": {
-                "vscode": entry_name,
-                "claude_desktop": entry_name,
+                target_id: entry_name
+                for target_id in FORCE_PORTABLE_NAME_TARGETS
             },
             "target_adapter_paths": target_adapter_paths,
         }
@@ -278,10 +294,12 @@ class GlobalTargetPathsMixin:
     ) -> dict:
         definition = GLOBAL_SKILL_TARGETS.get(target_id, {})
         kind = definition.get("kind", "")
+        available = self._global_skill_target_available(target_id)
         state = {
             "id": target_id,
             "label": definition.get("label", target_id),
             "kind": kind,
+            "available": available,
             "enabled": False,
             "status": "disabled",
             "managed": False,
@@ -342,6 +360,8 @@ class GlobalTargetPathsMixin:
                         "managed": True,
                         "legacy_target": legacy_target,
                     })
+            if not state["enabled"] and not available:
+                state["status"] = "unavailable"
             return state
         expected_source = self._global_target_link_source(descriptor, target_id)
         if not self._same_real_path(target, expected_source):
