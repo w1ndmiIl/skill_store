@@ -8,7 +8,7 @@ SkillHub 是一个本地运行的 AI Skill 管理与同步工具。它用于集�
 
 ![SkillHub 中文技能库界面](docs/screenshots/zh/skill-library.png)
 
-*截图来自 v3.3.0 便携版；技能名称、项目路径和启用状态取自本地演示环境。*
+*截图依据 v3.5.0 当前界面重拍；Skill 名称、项目路径和启用状态均为脱敏演示数据。*
 
 ## SkillHub 解决什么问题
 

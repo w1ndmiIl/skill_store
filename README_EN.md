@@ -8,7 +8,7 @@ Users can review changes, conflicts, and scope overlaps before a write and safel
 
 ![SkillHub English Skill library](docs/screenshots/en/skill-library.png)
 
-*Captured from the v3.3.0 portable build. Skill names, project paths, and enablement states come from the local demonstration environment.*
+*Recaptured from the current v3.5.0 interface. Skill names, project paths, and enablement states are sanitized demonstration data.*
 
 ## Problems SkillHub solves
 
