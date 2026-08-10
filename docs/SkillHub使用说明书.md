@@ -123,15 +123,15 @@ python main.py
 构建便携版：
 
 ```powershell
-python -m pip install pyinstaller
-pyinstaller --clean --noconfirm SkillHub.spec
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m PyInstaller --clean --noconfirm SkillHub.spec
 ```
 
 ## 3. 界面与查看模式
 
 ![SkillHub 中文全局技能库](screenshots/zh/skill-library.png)
 
-*图 3：v3.3.0 中文全局库模式。截图中的 Skill、项目路径和状态来自本地演示环境。*
+*图 3：v3.5.0 中文全局库模式。截图中的 Skill、项目路径和状态均为脱敏演示数据。*
 
 SkillHub 有两种主要查看方式：
 
@@ -180,7 +180,7 @@ SkillHub 只接受已经登记的项目路径。项目目录被移动或删除�
 
 ![项目 Skill 配置](screenshots/zh/project-configuration.png)
 
-*图 2：项目模式同时展示说明、分类、同步状态和启用开关，底部操作栏汇总待同步变化。*
+*图 4：项目模式同时展示说明、分类、同步状态和启用开关，底部操作栏汇总待同步变化。*
 
 ## 5. 支持的 Skill 类型
 
@@ -351,6 +351,8 @@ collection\
 
 ![Skill 使用配置可视化编辑](screenshots/zh/skill-metadata-editor.png)
 
+*图 5：标准 Skill 包可在 `SKILL.md` 与 `agents/openai.yaml` 之间切换；调用策略和工具依赖默认使用可视化表单。*
+
 `agents/openai.yaml` 默认使用可视化配置，不要求用户记忆 YAML 结构。每个字段旁都会说明“它影响什么”和“它不影响什么”：
 
 - `display_name` 只改变界面显示名称，不会改变 `$skill-name` 调用名称；
@@ -396,7 +398,7 @@ collection\
 
 ![Skill 集合管理](screenshots/zh/collection-manager.png)
 
-*图 3：集合成员保持独立入口；未选择项目时只读查看，选择项目后再调整启用范围。*
+*图 6：集合成员保持独立入口；全局库模式下可分别查看文档并管理全局目标，项目模式下再调整启用范围。*
 
 集合页用于控制成员是否可以参与项目配置。
 
@@ -497,7 +499,7 @@ collection\
 
 ![SkillOps Agent 工作区](screenshots/zh/skillops-agent.png)
 
-*图 4：真实只读运行在 2/32 步内完成；右侧是经过筛选的工具时间线、最终状态和相关记忆。*
+*图 7：Agent 空工作区先展示可直接采用的任务入口；右侧执行记录用于呈现阶段、工具时间线、审批和相关记忆。*
 
 SkillOps Agent 是辅助管理 Skill 的可选模块。每次模型请求都会注册工具 JSON Schema，模型返回 `tool_calls` 后，后端验证工具名称和参数、执行工具、把观察结果作为 `tool` 消息反馈给模型，再继续决策。单次任务默认最多执行 32 轮；连续 4 次返回相同工具决策时会判断为无进展循环并提前停止，兼顾复杂任务完成度和失控保护。
 
@@ -521,7 +523,7 @@ Skill 文档详情仍然使用确定性的本地查看器，不需要调用模�
 
 ![Skill 文档详情](screenshots/zh/skill-detail.png)
 
-*图 5：详情抽屉把元数据与 Markdown 正文分开呈现；编辑源文件是显式操作。*
+*图 8：详情抽屉把元数据与 Markdown 正文分开呈现；编辑源文件是显式操作。*
 
 右侧执行面板显示当前阶段、工具时间线、等待批准的操作、最终状态以及本次使用的记忆。普通工具记录只展示状态、经过筛选的关键参数、结果数量或错误摘要，不展开网页搜索正文和完整 JSON；界面最多保留最近 14 条，较早记录显示为省略数量。写操作审批区域展示核对所需的参数摘要与绑定摘要。它不展示隐藏思维链。暂停任务会持久化，软件重启后仍可批准、拒绝或恢复。
 

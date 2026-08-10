@@ -14,6 +14,7 @@ let pendingSyncSummary = null;
 let pendingSyncRequestId = 0;
 let pendingSyncTimer = null;
 const modalReturnFocus = new WeakMap();
+let categoryResizeTimer = null;
 
 // i18n & Theme State
 let currentLanguage = 'zh';
@@ -48,6 +49,9 @@ let openaiEditorMode = 'form';
 let editorOpenaiForm = {};
 let editorOpenaiFormDirty = false;
 let editorOpenaiFormError = '';
+let editorInitialSnapshot = null;
+let editorClosePending = false;
+let reviewResolve = null;
 
 // DOM cache
 const projectList = document.getElementById('project-list');
@@ -117,6 +121,10 @@ const skillDetailEdit = document.getElementById('skill-detail-edit');
 const skillDetailDelete = document.getElementById('skill-detail-delete');
 const globalTargetModal = document.getElementById('global-target-modal');
 const skillGlobalTargets = document.getElementById('skill-global-targets');
+const appContainer = document.querySelector('.app-container');
+const editorDirtyIndicator = document.getElementById('editor-dirty-indicator');
+const skillDetailClose = document.getElementById('skill-detail-close');
+const reviewModal = document.getElementById('review-modal');
 
 function getModalFocusableElements(modal) {
   return Array.from(modal.querySelectorAll(
@@ -125,9 +133,12 @@ function getModalFocusableElements(modal) {
 }
 
 function activateModal(modal, preferredFocus = null) {
+  if (!modal) return;
   if (!modal.classList.contains('active')) {
     modalReturnFocus.set(modal, document.activeElement);
   }
+  modal.removeAttribute('inert');
+  modal.inert = false;
   modal.classList.add('active');
   modal.setAttribute('aria-hidden', 'false');
   setTimeout(() => {
@@ -137,8 +148,11 @@ function activateModal(modal, preferredFocus = null) {
 }
 
 function deactivateModal(modal) {
+  if (!modal) return;
   modal.classList.remove('active');
   modal.setAttribute('aria-hidden', 'true');
+  modal.setAttribute('inert', '');
+  modal.inert = true;
   const returnFocus = modalReturnFocus.get(modal);
   modalReturnFocus.delete(modal);
   if (returnFocus && document.contains(returnFocus)) {
@@ -170,9 +184,13 @@ document.addEventListener('keydown', event => {
   const activeModals = Array.from(document.querySelectorAll('.modal-overlay.active'));
   const modal = activeModals[activeModals.length - 1];
   if (!modal) {
-    if (event.key === 'Escape' && skillDrawer?.classList.contains('active')) {
-      event.preventDefault();
-      closeSkillDrawer();
+    if (skillDrawer?.classList.contains('active')) {
+      if (event.key === 'Tab') {
+        trapModalFocus(event, skillDrawer);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        closeSkillDrawer();
+      }
     }
     return;
   }
@@ -185,6 +203,7 @@ document.addEventListener('keydown', event => {
     event.stopPropagation();
     const closeActions = {
       'dialog-modal': closeDialogModal,
+      'review-modal': () => closeStructuredReview(false),
       'editor-modal': closeEditorModal,
       'collection-modal': closeCollectionModal,
       'global-target-modal': closeGlobalTargetModal,
@@ -307,8 +326,8 @@ const locales = {
     openaiToolTransport: '连接方式',
     openaiToolUrl: '服务地址',
     openaiToolRemove: '删除此依赖',
-    editModalTabSource: '编辑源码',
-    editModalTabPreview: '实时预览',
+    editModalTabSource: '编辑',
+    editModalTabPreview: '预览',
     editModalCancel: '取消',
     editModalSave: '保存并更新',
     toastLoadFail: '获取列表失败: ',
@@ -350,7 +369,19 @@ const locales = {
     btnTestConnection: '测试连接',
     exitProjectMode: '已返回技能库',
     confirmRemove: '确定要移除此项目的关联吗？\n不会删除项目中的任何文件。',
-    defaultDesc: '此技能暂无详细描述信息。'
+    defaultDesc: '此技能暂无详细描述信息。',
+    agentSessionList: '会话列表',
+    agentEmptyTitle: '给 SkillOps Agent 一个目标',
+    agentEmptyDescription: 'Agent 会自主选择检查、检索和草案工具；写入前始终等待你的批准。',
+    agentSuggestionReview: '生成代码审查规范',
+    agentSuggestionReviewNote: '从技术栈和风险点开始',
+    agentSuggestionAudit: '检查现有 Skill',
+    agentSuggestionAuditNote: '发现冲突、重复和缺口',
+    agentSuggestionExtract: '从文档提取规范',
+    agentSuggestionExtractNote: '整理为可复用的规则',
+    agentPromptReview: '根据当前项目技术栈，帮我生成一份代码审查 Skill',
+    agentPromptAudit: '检查现有 Skill 是否有冲突、重复或不清晰的规则',
+    agentPromptExtract: '帮我把项目文档整理成一份结构清晰的开发 Skill'
   },
   en: {
     sidebarTitle: 'SkillHub',
@@ -460,8 +491,8 @@ const locales = {
     openaiToolTransport: 'Transport',
     openaiToolUrl: 'Service URL',
     openaiToolRemove: 'Remove dependency',
-    editModalTabSource: 'Edit Source',
-    editModalTabPreview: 'Live Preview',
+    editModalTabSource: 'Edit',
+    editModalTabPreview: 'Preview',
     editModalCancel: 'Cancel',
     editModalSave: 'Save & Update',
     toastLoadFail: 'Failed to fetch skill list: ',
@@ -503,7 +534,19 @@ const locales = {
     btnTestConnection: 'Test Link',
     exitProjectMode: 'Back to the Skill library',
     confirmRemove: 'Are you sure you want to unlink this project?\nNo files will be deleted from your disk.',
-    defaultDesc: 'No detailed description available for this skill.'
+    defaultDesc: 'No detailed description available for this skill.',
+    agentSessionList: 'Sessions',
+    agentEmptyTitle: 'Give SkillOps Agent a goal',
+    agentEmptyDescription: 'The agent chooses inspection, research, and drafting tools; writes always wait for your approval.',
+    agentSuggestionReview: 'Create review guidance',
+    agentSuggestionReviewNote: 'Start from the stack and risks',
+    agentSuggestionAudit: 'Audit existing Skills',
+    agentSuggestionAuditNote: 'Find conflicts, duplication, and gaps',
+    agentSuggestionExtract: 'Extract guidance from docs',
+    agentSuggestionExtractNote: 'Turn project docs into reusable rules',
+    agentPromptReview: 'Create a code review Skill based on the current project stack',
+    agentPromptAudit: 'Check existing Skills for conflicts, duplication, or unclear rules',
+    agentPromptExtract: 'Turn the project documentation into a clear development Skill'
   }
 };
 
@@ -581,11 +624,15 @@ const categoryTranslations = {
     'Team Collaboration': '团队协作',
     'Frontend Development': '前端开发',
     'Code Analysis': '代码分析',
+    'Text Optimization': '文本优化',
+    'Security Engineering': '安全工程',
     'Uncategorized': '未分类',
     '编程开发': '编程开发',
     '工作流程': '工作流程',
     '工作流': '工作流程',
-    '未分类': '未分类'
+    '未分类': '未分类',
+    '文本优化': '文本优化',
+    '安全工程': '安全工程'
   },
   en: {
     '编程开发': 'Development',
@@ -596,10 +643,14 @@ const categoryTranslations = {
     '团队协作': 'Team Collaboration',
     '前端开发': 'Frontend Development',
     '代码分析': 'Code Analysis',
+    '文本优化': 'Text Optimization',
+    '安全工程': 'Security Engineering',
     '未分类': 'Uncategorized',
     'Development': 'Development',
     'Workflow': 'Workflow',
-    'Uncategorized': 'Uncategorized'
+    'Uncategorized': 'Uncategorized',
+    'Text Optimization': 'Text Optimization',
+    'Security Engineering': 'Security Engineering'
   }
 };
 
@@ -734,10 +785,15 @@ function applyLanguage(lang) {
   });
   renderOpenaiToolDependencies();
   refreshEditorSourceUi();
+  updateEditorDirtyState();
   if (!skillMetadataBar.hidden) populateSkillCategoryOptions(skillCategorySelect.value);
 
   // Modals (Settings)
   document.getElementById('settings-modal-title').textContent = t.settingsTitle;
+  document.getElementById('settings-nav-general').textContent = lang === 'zh' ? '通用' : 'General';
+  document.getElementById('settings-nav-paths').textContent = lang === 'zh' ? '路径' : 'Paths';
+  document.getElementById('settings-nav-targets').textContent = lang === 'zh' ? '全局目标' : 'Global targets';
+  document.getElementById('settings-nav-ai').textContent = 'AI';
   document.getElementById('settings-heading-general').textContent = t.settingsHeadingGeneral;
   document.getElementById('settings-label-lang').textContent = t.settingsLabelLang;
   document.getElementById('settings-desc-lang').textContent = t.settingsDescLang;
@@ -919,6 +975,13 @@ function updateWorkspaceMode() {
       ? (currentLanguage === 'zh' ? '项目配置' : 'Project setup')
       : (currentLanguage === 'zh' ? '技能库' : 'Skill library');
   }
+  const newSkillButton = document.getElementById('btn-new-skill');
+  if (newSkillButton) {
+    const label = isProjectMode
+      ? (currentLanguage === 'zh' ? '新建全局 Skill' : 'New Global Skill')
+      : (currentLanguage === 'zh' ? '新建 Skill' : 'New Skill');
+    newSkillButton.innerHTML = `<i data-lucide="plus" aria-hidden="true"></i>${label}`;
+  }
   if (isProjectMode) {
     currentProjectTitle.textContent = project.name;
     currentProjectDesc.textContent = project.path;
@@ -961,11 +1024,11 @@ function renderProjectsList() {
     const encodedPath = encodeURIComponent(proj.path);
     const escapedPath = proj.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     item.innerHTML = `
-      <div class="project-details" onclick="handleSelectProject(decodeURIComponent('${encodedPath}'))">
+      <button type="button" class="project-details" onclick="handleSelectProject(decodeURIComponent('${encodedPath}'))" aria-label="${escapeHtml(currentLanguage === 'zh' ? `打开项目 ${proj.name}` : `Open project ${proj.name}`)}">
         <span class="project-name">${escapeHtml(proj.name)}</span>
         <span class="project-path">${escapeHtml(proj.path)}</span>
         ${errorBadge}
-      </div>
+      </button>
       <button class="delete-project-btn btn-icon" onclick="handleDeleteProject(event, '${escapedPath}')" title="移除项目">
         <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
       </button>`;
@@ -1373,6 +1436,8 @@ function getCanonicalCategory(skill) {
   if (cat === '团队协作') return 'Team Collaboration';
   if (cat === '前端开发') return 'Frontend Development';
   if (cat === '代码分析') return 'Code Analysis';
+  if (cat === '文本优化') return 'Text Optimization';
+  if (cat === '安全工程') return 'Security Engineering';
   if (cat === '未分类') return 'Uncategorized';
 
   return cat;
@@ -1381,6 +1446,23 @@ function getCanonicalCategory(skill) {
 // Translate canonical category to current language for UI
 function getLocalizedCategory(canonicalCat) {
   return categoryTranslations[currentLanguage]?.[canonicalCat] || canonicalCat;
+}
+
+function getSkillListIcon(skill) {
+  if (skill.is_collection) return 'layers-3';
+  if (skill.project_only) return 'file-lock-2';
+  const icons = {
+    Development: 'code-2',
+    Workflow: 'git-branch',
+    'Engineering Efficiency': 'gauge',
+    'Engineering Quality': 'shield-check',
+    'Team Collaboration': 'users',
+    'Frontend Development': 'monitor-smartphone',
+    'Code Analysis': 'scan-search',
+    'Text Optimization': 'file-text',
+    'Security Engineering': 'shield'
+  };
+  return icons[getCanonicalCategory(skill)] || 'file';
 }
 
 // Render dynamic category pills
@@ -1396,23 +1478,44 @@ function renderCategoryFilterBar() {
   const uniqueCanonicalCategories = Array.from(categoriesSet).sort();
   
   const allLabel = currentLanguage === 'zh' ? '全部' : 'All';
-  let html = `<button class="category-pill ${activeCategoryFilter === null ? 'active' : ''}" onclick="handleSelectCategory(null)">${allLabel}</button>`;
-  
-  uniqueCanonicalCategories.forEach(canonicalCat => {
+  const visibleLimit = window.innerWidth <= 820 ? 3 : window.innerWidth <= 1060 ? 4 : 7;
+  let visibleCategories = uniqueCanonicalCategories.slice(0, visibleLimit);
+  if (activeCategoryFilter && !visibleCategories.includes(activeCategoryFilter)) {
+    visibleCategories = [...visibleCategories.slice(0, Math.max(0, visibleLimit - 1)), activeCategoryFilter];
+  }
+  const hiddenCategories = uniqueCanonicalCategories.filter(category => !visibleCategories.includes(category));
+  const renderPill = canonicalCat => {
     const localizedLabel = getLocalizedCategory(canonicalCat);
     const isActive = activeCategoryFilter === canonicalCat;
-    html += `<button class="category-pill ${isActive ? 'active' : ''}" onclick="handleSelectCategory('${canonicalCat.replace(/'/g, "\\'")}')">${localizedLabel}</button>`;
-  });
+    return `<button class="category-pill ${isActive ? 'active' : ''}" onclick="handleSelectCategory('${canonicalCat.replace(/'/g, "\\'")}')">${escapeHtml(localizedLabel)}</button>`;
+  };
+  let html = `<button class="category-pill ${activeCategoryFilter === null ? 'active' : ''}" onclick="handleSelectCategory(null)">${allLabel}</button>`;
+  html += visibleCategories.map(renderPill).join('');
+  if (hiddenCategories.length) {
+    const hiddenActive = hiddenCategories.includes(activeCategoryFilter);
+    html += `
+      <details class="category-more ${hiddenActive ? 'active' : ''}">
+        <summary>${currentLanguage === 'zh' ? '更多' : 'More'} <i data-lucide="chevron-down" aria-hidden="true"></i></summary>
+        <div class="category-more-menu">${hiddenCategories.map(renderPill).join('')}</div>
+      </details>`;
+  }
   
   categoryFilterBar.innerHTML = html;
+  lucide.createIcons();
 }
 
 // Handle category select
 window.handleSelectCategory = function(canonicalCat) {
+  document.querySelector('.category-more')?.removeAttribute('open');
   activeCategoryFilter = canonicalCat;
   renderCategoryFilterBar();
   renderSkillsGrid();
 };
+
+window.addEventListener('resize', () => {
+  clearTimeout(categoryResizeTimer);
+  categoryResizeTimer = setTimeout(renderCategoryFilterBar, 120);
+});
 
 // COLLECTION_PROJECT_STATE_HELPER_START
 function resolveCollectionProjectState(
@@ -1521,9 +1624,8 @@ function renderSkillsGrid() {
     card.className = `skill-card skill-row${skill.is_collection ? ' collection-card' : ''}${skill.project_only ? ' project-only-card' : ''}`;
     card.dataset.filename = skill.filename;
 
-    // Apply 100% Local Smart Classifier for Emojis and Tags
+    // Keep semantic tags local; list icons come from the shared Lucide system.
     const smart = getSmartEmojiAndTags(skill);
-    const resolvedEmoji = smart.emoji;
     const resolvedTags = smart.tags;
 
     let statusHTML = '';
@@ -1676,7 +1778,7 @@ function renderSkillsGrid() {
           </button>`;
     card.innerHTML = `
       <div class="skill-row-primary">
-        <div class="skill-emoji">${escapeHtml(resolvedEmoji)}</div>
+        <div class="skill-emoji" aria-hidden="true"><i data-lucide="${getSkillListIcon(skill)}"></i></div>
         <div class="skill-info">
           <div class="skill-title-line">
             <h4 class="skill-title" title="${safeTitle}">${safeMainTitle}</h4>
@@ -2202,27 +2304,21 @@ async function handleSyncSkills() {
     }
 
     restoreButton();
-    const confirmed = await showCustomDialog({
-      title: locales[currentLanguage].syncPreviewTitle,
-      message: formatSyncPreview(preview),
-      emoji: '↻',
-      confirmText: locales[currentLanguage].syncApply
-    });
+    const confirmed = await showStructuredReview(buildSyncReview(preview));
     if (!confirmed) return;
 
     let acceptedBundleFiles = false;
     if (preview.has_restricted_bundle_files) {
-      acceptedBundleFiles = await showCustomDialog({
+      acceptedBundleFiles = await showStructuredReview({
         title: currentLanguage === 'zh' ? '授权 Bundle 额外文件' : 'Authorize Extra Bundle Files',
-        message: [
-          currentLanguage === 'zh'
-            ? '以下文件位于 README 和 .agent/skills 之外，将写入项目目录：'
-            : 'These files are outside README and .agent/skills and will be written into the project:',
-          '',
-          ...preview.restricted_bundle_files.map(path => `• ${path}`)
-        ].join('\n'),
-        emoji: '⚠️',
-        confirmText: currentLanguage === 'zh' ? '授权这些文件' : 'Authorize Files'
+        kicker: currentLanguage === 'zh' ? '额外写入范围' : 'Additional write scope',
+        intro: currentLanguage === 'zh'
+          ? '以下文件位于 README 和 .agent/skills 之外，将写入项目目录。'
+          : 'These files are outside README and .agent/skills and will be written into the project.',
+        metrics: [{ value: preview.restricted_bundle_files.length, label: currentLanguage === 'zh' ? '额外文件' : 'Extra files', tone: 'warning' }],
+        sections: [{ title: currentLanguage === 'zh' ? '待授权路径' : 'Paths to authorize', items: preview.restricted_bundle_files }],
+        confirmText: currentLanguage === 'zh' ? '授权这些文件' : 'Authorize Files',
+        danger: true
       });
       if (!acceptedBundleFiles) return;
     }
@@ -2238,20 +2334,18 @@ async function handleSyncSkills() {
     if (result.requires_confirmation) {
       preview = result.preview;
       restoreButton();
-      const reconfirmed = await showCustomDialog({
-        title: locales[currentLanguage].syncPreviewTitle,
-        message: formatSyncPreview(preview),
-        emoji: '!',
-        confirmText: locales[currentLanguage].syncApply
-      });
+      const reconfirmed = await showStructuredReview(buildSyncReview(preview));
       if (!reconfirmed) return;
       acceptedBundleFiles = false;
       if (preview.has_restricted_bundle_files) {
-        acceptedBundleFiles = await showCustomDialog({
+        acceptedBundleFiles = await showStructuredReview({
           title: currentLanguage === 'zh' ? '重新授权 Bundle 额外文件' : 'Reauthorize Extra Bundle Files',
-          message: preview.restricted_bundle_files.map(path => `• ${path}`).join('\n'),
-          emoji: '⚠️',
-          confirmText: currentLanguage === 'zh' ? '授权这些文件' : 'Authorize Files'
+          kicker: currentLanguage === 'zh' ? '同步计划已变化' : 'Sync plan changed',
+          intro: currentLanguage === 'zh' ? '磁盘状态已变化，请重新确认额外写入路径。' : 'Disk state changed; review the extra paths again.',
+          metrics: [{ value: preview.restricted_bundle_files.length, label: currentLanguage === 'zh' ? '额外文件' : 'Extra files', tone: 'warning' }],
+          sections: [{ title: currentLanguage === 'zh' ? '待授权路径' : 'Paths to authorize', items: preview.restricted_bundle_files }],
+          confirmText: currentLanguage === 'zh' ? '授权这些文件' : 'Authorize Files',
+          danger: true
         });
         if (!acceptedBundleFiles) return;
       }
@@ -2475,6 +2569,56 @@ function formatAiImportDiff(preview) {
   ].join('\n');
 }
 
+function buildImportReview(preview, title, confirmText) {
+  const isZh = currentLanguage === 'zh';
+  const findings = preview.findings || [];
+  const highRiskCount = findings.filter(item => item.severity === 'high').length;
+  const collectionCount = preview.kind === 'collection' ? (preview.collection_count || 0) : 1;
+  return {
+    title,
+    kicker: isZh ? '导入前体检' : 'Pre-import review',
+    intro: isZh
+      ? `来源：${preview.source_name || '—'}。确认后才会写入全局技能库。`
+      : `Source: ${preview.source_name || '—'}. Nothing is written to the global library until you confirm.`,
+    metrics: [
+      { value: collectionCount, label: isZh ? '扫描 Skill' : 'Skills scanned' },
+      { value: preview.installable_count ?? (preview.can_import ? 1 : 0), label: isZh ? '可安装' : 'Installable', tone: 'success' },
+      { value: findings.length, label: isZh ? '检查提示' : 'Findings', tone: findings.length ? 'warning' : 'success' },
+      { value: highRiskCount + (preview.conflict_count || 0), label: isZh ? '需单独确认' : 'Need confirmation', tone: highRiskCount || preview.conflict_count ? 'danger' : '' }
+    ],
+    sections: [{
+      title: isZh ? '体检与兼容性详情' : 'Validation and compatibility details',
+      items: formatImportPreview(preview).split('\n').filter(Boolean)
+    }],
+    confirmText,
+    danger: highRiskCount > 0
+  };
+}
+
+function buildSyncReview(preview) {
+  const isZh = currentLanguage === 'zh';
+  const summary = preview.summary || {};
+  return {
+    title: locales[currentLanguage].syncPreviewTitle,
+    kicker: isZh ? '项目同步计划' : 'Project sync plan',
+    intro: isZh
+      ? '以下计划来自当前磁盘状态。确认后才会写入项目，并保留可撤销记录。'
+      : 'This plan reflects the current disk state. Files are written only after confirmation and an undo record is retained.',
+    metrics: [
+      { value: summary.add || 0, label: isZh ? '新增' : 'Add', tone: 'success' },
+      { value: (summary.adopt || 0) + (summary.modify || 0), label: isZh ? '纳管 / 更新' : 'Adopt / update' },
+      { value: summary.delete || 0, label: isZh ? '移除' : 'Remove', tone: summary.delete ? 'warning' : '' },
+      { value: (preview.scope_conflict_count || 0) + (preview.has_conflicts ? 1 : 0), label: isZh ? '冲突信号' : 'Conflict signals', tone: preview.has_conflicts ? 'danger' : '' }
+    ],
+    sections: [{
+      title: isZh ? '文件与作用域影响' : 'File and scope impact',
+      items: formatSyncPreview(preview).split('\n').filter(Boolean)
+    }],
+    confirmText: locales[currentLanguage].syncApply,
+    danger: Boolean(preview.has_conflicts)
+  };
+}
+
 async function handleImportSkill() {
   const isZh = currentLanguage === 'zh';
   const selection = await showCustomDialog({
@@ -2502,14 +2646,12 @@ async function handleImportSkill() {
     return;
   }
 
-  const confirmed = await showCustomDialog({
-    title: preview.can_import
-      ? (isZh ? '确认导入' : 'Confirm Import')
-      : (isZh ? '无需重复导入' : 'Duplicate Skill'),
-    message: formatImportPreview(preview),
-    emoji: preview.findings?.some(item => item.severity === 'high') ? '⚠️' : '📋',
-    confirmText: preview.can_import ? (isZh ? '导入' : 'Import') : (isZh ? '关闭' : 'Close')
-  });
+  const importReview = buildImportReview(
+    preview,
+    preview.can_import ? (isZh ? '确认导入' : 'Confirm Import') : (isZh ? '无需重复导入' : 'Duplicate Skill'),
+    preview.can_import ? (isZh ? '导入' : 'Import') : (isZh ? '关闭' : 'Close')
+  );
+  const confirmed = await showStructuredReview(importReview);
   if (!confirmed || !preview.can_import) {
     try {
       await window.pywebview.api.discard_skill_import(preview.token);
@@ -2521,14 +2663,18 @@ async function handleImportSkill() {
 
   let acceptedHighRisk = false;
   if (preview.has_high_risk) {
-    acceptedHighRisk = await showCustomDialog({
+    const highRiskFindings = preview.findings.filter(item => item.severity === 'high');
+    acceptedHighRisk = await showStructuredReview({
       title: isZh ? '单独确认高风险项' : 'Confirm High-Risk Findings',
-      message: preview.findings
-        .filter(item => item.severity === 'high')
-        .map(item => `• ${isZh ? item.message_zh : item.message_en}${item.path ? ` [${item.path}]` : ''}`)
-        .join('\n'),
-      emoji: '⚠️',
-      confirmText: isZh ? '确认风险并继续' : 'Accept Risk and Continue'
+      kicker: isZh ? '安全边界' : 'Security boundary',
+      intro: isZh ? '这些项目需要独立确认，不会由普通导入确认自动放行。' : 'These findings require an explicit decision beyond the standard import confirmation.',
+      metrics: [{ value: highRiskFindings.length, label: isZh ? '高风险项' : 'High-risk findings', tone: 'danger' }],
+      sections: [{
+        title: isZh ? '风险详情' : 'Risk details',
+        items: highRiskFindings.map(item => `${isZh ? item.message_zh : item.message_en}${item.path ? ` [${item.path}]` : ''}`)
+      }],
+      confirmText: isZh ? '确认风险并继续' : 'Accept Risk and Continue',
+      danger: true
     });
     if (!acceptedHighRisk) {
       await window.pywebview.api.discard_skill_import(preview.token);
@@ -2538,14 +2684,15 @@ async function handleImportSkill() {
 
   let acceptedCollectionConflicts = false;
   if ((preview.conflict_count || 0) > 0) {
-    acceptedCollectionConflicts = await showCustomDialog({
+    const conflicts = preview.collection_items.filter(item => item.action === 'conflict');
+    acceptedCollectionConflicts = await showStructuredReview({
       title: isZh ? '确认覆盖集合冲突' : 'Confirm Collection Conflicts',
-      message: preview.collection_items
-        .filter(item => item.action === 'conflict')
-        .map(item => `• ${item.source_name} → ${item.active_name}`)
-        .join('\n'),
-      emoji: '⚠️',
-      confirmText: isZh ? '覆盖本地修改' : 'Overwrite Local Changes'
+      kicker: isZh ? '本地修改冲突' : 'Local modification conflicts',
+      intro: isZh ? '以下目标含本地修改；继续会先归档旧版本，再覆盖活动副本。' : 'These targets contain local edits. Continuing archives the old versions before replacing the active copies.',
+      metrics: [{ value: conflicts.length, label: isZh ? '覆盖冲突' : 'Overwrite conflicts', tone: 'danger' }],
+      sections: [{ title: isZh ? '冲突映射' : 'Conflict mapping', items: conflicts.map(item => `${item.source_name} → ${item.active_name}`) }],
+      confirmText: isZh ? '覆盖本地修改' : 'Overwrite Local Changes',
+      danger: true
     });
     if (!acceptedCollectionConflicts) {
       await window.pywebview.api.discard_skill_import(preview.token);
@@ -2555,10 +2702,12 @@ async function handleImportSkill() {
 
   let acceptedAiChanges = false;
   if (preview.ai_used) {
-    acceptedAiChanges = await showCustomDialog({
+    acceptedAiChanges = await showStructuredReview({
       title: isZh ? '审阅 AI 改写差异' : 'Review AI Changes',
-      message: formatAiImportDiff(preview),
-      emoji: '✨',
+      kicker: isZh ? '暂存副本差异' : 'Staged-copy diff',
+      intro: isZh ? 'AI 只改动暂存副本；上游原版已经归档。' : 'AI changed only the staged copy; the upstream original has been archived.',
+      metrics: [{ value: preview.kind === 'collection' ? preview.collection_items.filter(item => item.ai_used).length : 1, label: isZh ? 'AI 改写文档' : 'AI-edited documents' }],
+      sections: [{ title: isZh ? '文本差异' : 'Text diff', diff: formatAiImportDiff(preview) }],
       confirmText: isZh ? '接受改写并导入' : 'Accept Changes and Import'
     });
     if (!acceptedAiChanges) {
@@ -2895,6 +3044,30 @@ function syncActiveEditorBuffer() {
   }
 }
 
+function getEditorSnapshot() {
+  syncActiveEditorBuffer();
+  return JSON.stringify({
+    skillContent: editorSkillContent,
+    category: getSkillCategorySelectValue(skillCategorySelect.value),
+    openaiYaml: editorOpenaiYamlContent,
+    openaiForm: editorOpenaiForm,
+    createOpenaiYaml: editorOpenaiYamlCreateRequested
+  });
+}
+
+function updateEditorDirtyState() {
+  const dirty = Boolean(
+    !isViewingSkill
+    && editorInitialSnapshot !== null
+    && getEditorSnapshot() !== editorInitialSnapshot
+  );
+  if (editorDirtyIndicator) {
+    editorDirtyIndicator.hidden = !dirty;
+    editorDirtyIndicator.textContent = currentLanguage === 'zh' ? '未保存' : 'Unsaved';
+  }
+  return dirty;
+}
+
 function getEditorContentWithCategory() {
   const skillSource = activeEditorSource === 'skill'
     ? markdownTextarea.value
@@ -2953,6 +3126,7 @@ function switchEditorSource(source) {
     markdownTextarea.placeholder = '# 输入技能内容…';
   }
   refreshEditorSourceUi();
+  updateEditorDirtyState();
   (source === 'openai' && openaiEditorMode === 'form'
     ? openaiDisplayName
     : markdownTextarea).focus();
@@ -3077,6 +3251,7 @@ function addOpenaiToolDependency() {
   });
   editorOpenaiFormDirty = true;
   renderOpenaiToolDependencies();
+  updateEditorDirtyState();
   openaiToolsList.querySelector('.openai-tool-card:last-child [data-field="value"]')?.focus();
 }
 
@@ -3085,6 +3260,7 @@ function removeOpenaiToolDependency(index) {
   editorOpenaiForm.tools.splice(index, 1);
   editorOpenaiFormDirty = true;
   renderOpenaiToolDependencies();
+  updateEditorDirtyState();
 }
 
 async function renderOpenaiFormToYaml() {
@@ -3202,11 +3378,16 @@ async function handleDeleteSkillCategory() {
 }
 
 skillCategorySelect.addEventListener('change', updateSkillCategoryDeleteButton);
+editorModal.addEventListener('input', updateEditorDirtyState);
+editorModal.addEventListener('change', updateEditorDirtyState);
 
 function resetSkillModalForEditing() {
   isViewingSkill = false;
   markdownTextarea.readOnly = false;
   editorSourceBar.hidden = false;
+  editorSourceBar.classList.remove('viewer-workbench');
+  editorSourceSkill.parentElement.hidden = false;
+  editorSourceHint.hidden = false;
   skillCategorySelect.disabled = false;
   updateSkillCategoryDeleteButton();
   modalSaveBtn.style.display = '';
@@ -3220,7 +3401,10 @@ function resetSkillModalForViewing() {
   isViewingSkill = true;
   editingFilename = null;
   markdownTextarea.readOnly = true;
-  editorSourceBar.hidden = true;
+  editorSourceBar.hidden = false;
+  editorSourceBar.classList.add('viewer-workbench');
+  editorSourceSkill.parentElement.hidden = true;
+  editorSourceHint.hidden = true;
   skillMetadataBar.hidden = true;
   editorOpenaiHint.hidden = true;
   skillCategorySelect.disabled = true;
@@ -3232,6 +3416,8 @@ function resetSkillModalForViewing() {
 }
 
 async function openEditorModal(filename) {
+  editorInitialSnapshot = null;
+  if (editorDirtyIndicator) editorDirtyIndicator.hidden = true;
   activeEditorSource = 'skill';
   editorSkillContent = '';
   editorOpenaiYamlContent = '';
@@ -3278,13 +3464,15 @@ async function openEditorModal(filename) {
     );
     populateSkillCategoryOptions(loadedEditorCategory);
     refreshEditorSourceUi();
+    editorInitialSnapshot = getEditorSnapshot();
+    updateEditorDirtyState();
   } catch (e) {
     showToast((currentLanguage === 'zh' ? '加载失败: ' : 'Failed to load: ') + e, 'error');
-    closeEditorModal();
+    await closeEditorModal(true);
   } finally {
     markdownTextarea.removeAttribute('disabled');
     skillCategorySelect.disabled = false;
-    markdownTextarea.focus();
+    if (editorModal.classList.contains('active')) markdownTextarea.focus();
   }
   lucide.createIcons();
 }
@@ -3307,10 +3495,17 @@ async function openSkillViewer(filename) {
     <span><i data-lucide="tag"></i>${escapeHtml(category)}</span>
     ${(smart.tags || []).slice(0, 3).map(tag => `<span class="detail-tag">${escapeHtml(tagTranslations[currentLanguage]?.[tag] || tag)}</span>`).join('')}`;
   skillDetailContent.innerHTML = `<div class="drawer-loading"><span class="loading-spinner"></span>${currentLanguage === 'zh' ? '加载文档…' : 'Loading document…'}</div>`;
+  skillDrawer.removeAttribute('inert');
+  skillDrawer.inert = false;
   skillDrawer.classList.add('active');
   skillDrawerBackdrop?.classList.add('active');
   skillDrawer.setAttribute('aria-hidden', 'false');
   document.body.classList.add('drawer-open');
+  if (appContainer) {
+    appContainer.setAttribute('inert', '');
+    appContainer.inert = true;
+  }
+  setTimeout(() => skillDetailClose?.focus(), 0);
   skillDetailEdit.style.display = skill.project_only ? 'none' : '';
   skillDetailDelete.style.display = skill.project_only ? 'none' : '';
   const showCodexGlobalAction = (
@@ -3362,6 +3557,12 @@ function closeSkillDrawer(restoreFocus = true) {
   skillDrawer.classList.remove('active');
   skillDrawerBackdrop?.classList.remove('active');
   skillDrawer.setAttribute('aria-hidden', 'true');
+  skillDrawer.setAttribute('inert', '');
+  skillDrawer.inert = true;
+  if (appContainer) {
+    appContainer.removeAttribute('inert');
+    appContainer.inert = false;
+  }
   document.body.classList.remove('drawer-open');
   activeDrawerFilename = null;
   if (restoreFocus && drawerReturnFocus && document.contains(drawerReturnFocus)) {
@@ -3370,7 +3571,21 @@ function closeSkillDrawer(restoreFocus = true) {
   drawerReturnFocus = null;
 }
 
-function closeEditorModal() {
+async function closeEditorModal(force = false) {
+  if (editorClosePending) return;
+  if (!force && updateEditorDirtyState()) {
+    editorClosePending = true;
+    const discard = await showCustomDialog({
+      title: currentLanguage === 'zh' ? '放弃未保存修改？' : 'Discard unsaved changes?',
+      message: currentLanguage === 'zh'
+        ? 'SKILL.md、分类或使用配置中的修改尚未保存。关闭后将无法恢复。'
+        : 'Changes to SKILL.md, its category, or usage configuration have not been saved and cannot be recovered after closing.',
+      emoji: '⚠️',
+      confirmText: currentLanguage === 'zh' ? '放弃修改' : 'Discard changes'
+    });
+    editorClosePending = false;
+    if (!discard) return;
+  }
   deactivateModal(editorModal);
   editingFilename = null;
   isViewingSkill = false;
@@ -3388,6 +3603,8 @@ function closeEditorModal() {
   editorOpenaiForm = {};
   editorOpenaiFormDirty = false;
   editorOpenaiFormError = '';
+  editorInitialSnapshot = null;
+  if (editorDirtyIndicator) editorDirtyIndicator.hidden = true;
   populateSkillCategoryOptions();
   markdownTextarea.readOnly = false;
   markdownTextarea.hidden = false;
@@ -3428,7 +3645,7 @@ async function handleSaveSkill() {
     });
     if (result.error) throw new Error(result.error);
     showToast(locales[currentLanguage].toastSaveSuccess, 'success');
-    closeEditorModal();
+    await closeEditorModal(true);
     await fetchSkills();
     await checkForUnregisteredSkills();
     if (currentProjectPath) {
@@ -3447,6 +3664,8 @@ async function handleSaveSkill() {
 function showToast(message, type = 'success', options = {}) {
   const toast = document.createElement('div');
   toast.className = 'toast';
+  toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  toast.setAttribute('aria-atomic', 'true');
   let icon = 'check', iconClass = 'success';
   if (type === 'error') { icon = 'x'; iconClass = 'error'; }
   else if (type === 'warning') { icon = 'alert-triangle'; iconClass = 'warning'; }
@@ -3474,7 +3693,27 @@ function showToast(message, type = 'success', options = {}) {
       removeToast();
     });
   }
-  setTimeout(removeToast, options.duration || (options.actionLabel ? 8000 : 3500));
+  let remaining = options.duration || (options.actionLabel ? 8000 : 3500);
+  let startedAt = Date.now();
+  let removeTimer = null;
+  const scheduleRemoval = () => {
+    startedAt = Date.now();
+    removeTimer = setTimeout(removeToast, remaining);
+  };
+  const pauseRemoval = () => {
+    if (!removeTimer) return;
+    clearTimeout(removeTimer);
+    removeTimer = null;
+    remaining = Math.max(500, remaining - (Date.now() - startedAt));
+  };
+  const resumeRemoval = () => {
+    if (!removed && !removeTimer) scheduleRemoval();
+  };
+  toast.addEventListener('mouseenter', pauseRemoval);
+  toast.addEventListener('mouseleave', resumeRemoval);
+  toast.addEventListener('focusin', pauseRemoval);
+  toast.addEventListener('focusout', resumeRemoval);
+  scheduleRemoval();
 }
 
 async function handleChangeSkillsDir() {
@@ -3528,6 +3767,14 @@ const settingsTheme = document.getElementById('settings-theme');
 const settingsSkillsDir = document.getElementById('settings-skills-dir');
 const settingsScanDir = document.getElementById('settings-scan-dir');
 const settingsGlobalTargets = document.getElementById('settings-global-targets');
+
+function scrollSettingsSection(sectionId) {
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  document.getElementById(sectionId)?.scrollIntoView({
+    behavior: reducedMotion ? 'auto' : 'smooth',
+    block: 'start'
+  });
+}
 
 function syncGlobalTargetSettings() {
   settingsGlobalTargets?.querySelectorAll('.global-target-option').forEach(option => {
@@ -3717,6 +3964,11 @@ let agentPanelCollapsed = false;
 
 function updateAgentDialogControls() {
   const isZh = currentLanguage === 'zh';
+  const t = locales[currentLanguage];
+  const setText = (id, value) => {
+    const element = document.getElementById(id);
+    if (element) element.textContent = value;
+  };
   const modalContainer = aiModal?.querySelector('.ai-modal-container');
   modalContainer?.classList.toggle('agent-panel-collapsed', agentPanelCollapsed);
   if (agentPanelToggle) {
@@ -3747,6 +3999,50 @@ function updateAgentDialogControls() {
     aiChatInputHint.textContent = isZh
       ? 'Enter 发送 · Shift+Enter 换行'
       : 'Enter to send · Shift+Enter for a new line';
+  }
+  if (aiChatInput) {
+    aiChatInput.placeholder = isZh
+      ? '描述 Skill 生命周期管理目标…'
+      : 'Describe a Skill lifecycle goal…';
+  }
+  setText('ai-session-title-label', t.agentSessionList);
+  setText('agent-empty-title', t.agentEmptyTitle);
+  setText('agent-empty-description', t.agentEmptyDescription);
+  setText('agent-suggestion-review', t.agentSuggestionReview);
+  setText('agent-suggestion-review-note', t.agentSuggestionReviewNote);
+  setText('agent-suggestion-audit', t.agentSuggestionAudit);
+  setText('agent-suggestion-audit-note', t.agentSuggestionAuditNote);
+  setText('agent-suggestion-extract', t.agentSuggestionExtract);
+  setText('agent-suggestion-extract-note', t.agentSuggestionExtractNote);
+  setText('agent-activity-title', isZh ? '执行记录' : 'Activity');
+  setText('agent-current-phase-label', isZh ? '当前阶段' : 'Current phase');
+  setText('agent-resume-label', isZh ? '恢复任务' : 'Resume run');
+  setText('agent-approval-title', isZh ? '等待批准' : 'Approval required');
+  setText('agent-reject-label', isZh ? '拒绝' : 'Reject');
+  setText('agent-approve-label', isZh ? '批准并继续' : 'Approve and continue');
+  setText('agent-timeline-title', isZh ? '工具时间线' : 'Tool timeline');
+  setText('agent-memory-title', isZh ? '相关记忆' : 'Related memory');
+  setText('agent-memory-view-all', isZh ? '查看全部' : 'View all');
+  setText('ai-preview-title', isZh ? '📄 生成的技能预览' : '📄 Generated Skill preview');
+  setText('ai-preview-copy-label', isZh ? '复制' : 'Copy');
+  setText('ai-preview-regenerate-label', isZh ? '重新生成' : 'Regenerate');
+  setText('ai-preview-save-label', isZh ? '保存' : 'Save');
+  setText('agent-timeline-empty', isZh ? '运行后显示计划、工具调用、观察结果、批准和错误。' : 'Plans, tool calls, observations, approvals, and errors appear after a run starts.');
+  setText('agent-memory-empty', isZh ? '本次尚未使用记忆。' : 'No memory has been used in this run.');
+  setText('agent-memory-settings-label', isZh ? '记忆设置' : 'Memory settings');
+  setText('agent-memory-enable-label', isZh ? '启用结构化记忆' : 'Enable structured memory');
+  setText('agent-memory-clear-label', isZh ? '清理全部记忆' : 'Clear all memory');
+  const sessionAddButton = document.querySelector('.ai-session-add');
+  if (sessionAddButton) {
+    sessionAddButton.title = isZh ? '新建会话' : 'New session';
+    sessionAddButton.setAttribute('aria-label', sessionAddButton.title);
+  }
+  const activityPanel = document.getElementById('agent-activity-panel');
+  activityPanel?.setAttribute('aria-label', isZh ? 'Agent 执行状态' : 'Agent activity status');
+  if (agentStatusBadge?.classList.contains('idle')) {
+    agentStatusBadge.textContent = isZh ? '空闲' : 'Idle';
+    agentPhase.textContent = isZh ? '等待目标' : 'Waiting for a goal';
+    agentRunId.textContent = isZh ? '尚未开始运行' : 'No run started';
   }
   if (aiSendBtn) {
     aiSendBtn.title = isZh ? '发送' : 'Send';
@@ -3781,9 +4077,10 @@ async function openAIModal() {
   aiGeneratedSkill = null;
   aiSkillPreview.style.display = 'none';
   try {
-    agentPanelCollapsed = (
-      localStorage.getItem('skillhub.agentPanelCollapsed') === '1'
-    );
+    const savedPanelState = localStorage.getItem('skillhub.agentPanelCollapsed');
+    agentPanelCollapsed = savedPanelState === null
+      ? window.innerWidth <= 820
+      : savedPanelState === '1';
   } catch (_error) {
     agentPanelCollapsed = false;
   }
@@ -3929,27 +4226,37 @@ async function saveCurrentSession() {
 function renderChatHistory() {
   aiChatMessages.innerHTML = '';
   if (aiChatHistory.length === 0) {
-    aiChatMessages.innerHTML = `
-      <div class="ai-chat-empty">
-        <div class="ai-empty-mark"><i data-lucide="bot"></i></div>
-        <h4>${currentLanguage === 'zh' ? '给 SkillOps Agent 一个目标' : 'Give SkillOps Agent a goal'}</h4>
-        <p>${currentLanguage === 'zh' ? 'Agent 会自主选择检查、检索和草案工具；写入前始终等待你的批准。' : 'The agent chooses inspection, research, and drafting tools; writes always wait for approval.'}</p>
-        <div class="ai-prompt-suggestions">
-          <button type="button" onclick="useAISuggestion('根据当前项目技术栈，帮我生成一份代码审查 Skill')"><i data-lucide="scan-search"></i><span><strong>生成代码审查规范</strong><small>从技术栈和风险点开始</small></span></button>
-          <button type="button" onclick="useAISuggestion('检查现有 Skill 是否有冲突、重复或不清晰的规则')"><i data-lucide="list-checks"></i><span><strong>检查现有 Skill</strong><small>发现冲突、重复和缺口</small></span></button>
-          <button type="button" onclick="useAISuggestion('帮我把项目文档整理成一份结构清晰的开发 Skill')"><i data-lucide="file-input"></i><span><strong>从文档提取规范</strong><small>整理为可复用的规则</small></span></button>
-        </div>
-      </div>`;
+    aiChatMessages.innerHTML = getAgentEmptyStateMarkup();
     lucide.createIcons();
   } else {
     aiChatHistory.forEach(m => {
       appendChatBubble(m.role, m.content);
     });
   }
-  aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
+  aiChatMessages.scrollTop = aiChatHistory.length ? aiChatMessages.scrollHeight : 0;
   const generateButton = document.getElementById('ai-btn-generate');
   if (generateButton) generateButton.disabled = aiChatHistory.length === 0 || aiIsLoading;
   updateAgentDialogControls();
+}
+
+function getAgentEmptyStateMarkup() {
+  const t = locales[currentLanguage];
+  const suggestion = (icon, prompt, title, note) => `
+    <button type="button" onclick="useAISuggestion(decodeURIComponent('${encodeURIComponent(prompt)}'))">
+      <i data-lucide="${icon}" aria-hidden="true"></i>
+      <span><strong>${escapeHtml(title)}</strong><small>${escapeHtml(note)}</small></span>
+    </button>`;
+  return `
+    <div class="ai-chat-empty">
+      <div class="ai-empty-mark"><i data-lucide="bot" aria-hidden="true"></i></div>
+      <h4>${escapeHtml(t.agentEmptyTitle)}</h4>
+      <p>${escapeHtml(t.agentEmptyDescription)}</p>
+      <div class="ai-prompt-suggestions">
+        ${suggestion('scan-search', t.agentPromptReview, t.agentSuggestionReview, t.agentSuggestionReviewNote)}
+        ${suggestion('list-checks', t.agentPromptAudit, t.agentSuggestionAudit, t.agentSuggestionAuditNote)}
+        ${suggestion('file-input', t.agentPromptExtract, t.agentSuggestionExtract, t.agentSuggestionExtractNote)}
+      </div>
+    </div>`;
 }
 
 // --- Chat interaction ---
@@ -4662,8 +4969,70 @@ function removeTypingIndicator(id) {
 }
 
 // ------------------------------------------
-// Custom Dialog Modal System
+// Structured Review and Custom Dialog Systems
 // ------------------------------------------
+
+function showStructuredReview({
+  title,
+  kicker = '',
+  intro = '',
+  metrics = [],
+  sections = [],
+  confirmText = '',
+  footnote = '',
+  danger = false
+}) {
+  if (reviewResolve) {
+    reviewResolve(false);
+    reviewResolve = null;
+  }
+  document.getElementById('review-title').textContent = title;
+  document.getElementById('review-kicker').textContent = kicker || (currentLanguage === 'zh' ? '变更审阅' : 'Change review');
+  const summaryElement = document.getElementById('review-summary');
+  summaryElement.innerHTML = metrics.map(metric => `
+    <div class="review-metric ${escapeHtml(metric.tone || '')}">
+      <strong>${escapeHtml(String(metric.value ?? 0))}</strong>
+      <span>${escapeHtml(metric.label || '')}</span>
+    </div>`).join('');
+  summaryElement.hidden = metrics.length === 0;
+
+  const bodyElement = document.getElementById('review-body');
+  const sectionMarkup = sections.map(section => {
+    const body = section.diff !== undefined
+      ? `<pre class="review-diff">${escapeHtml(String(section.diff || ''))}</pre>`
+      : `<ul class="review-list">${(section.items || []).map(item => `<li>${escapeHtml(String(item))}</li>`).join('')}</ul>`;
+    return `
+      <section class="review-section">
+        <div class="review-section-header">
+          <strong>${escapeHtml(section.title || '')}</strong>
+          ${section.meta ? `<span>${escapeHtml(section.meta)}</span>` : ''}
+        </div>
+        ${body}
+      </section>`;
+  }).join('');
+  bodyElement.innerHTML = `${intro ? `<p class="review-intro">${escapeHtml(intro)}</p>` : ''}${sectionMarkup}`;
+
+  const cancelButton = document.getElementById('review-cancel');
+  const confirmButton = document.getElementById('review-confirm');
+  cancelButton.textContent = currentLanguage === 'zh' ? '取消' : 'Cancel';
+  confirmButton.textContent = confirmText || (currentLanguage === 'zh' ? '确认继续' : 'Confirm and continue');
+  confirmButton.classList.toggle('review-confirm-danger', danger);
+  document.getElementById('review-footnote').textContent = footnote || (
+    currentLanguage === 'zh' ? '确认前请检查影响范围' : 'Review the impact before confirming'
+  );
+  lucide.createIcons();
+  activateModal(reviewModal, confirmButton);
+  return new Promise(resolve => {
+    reviewResolve = resolve;
+  });
+}
+
+function closeStructuredReview(result) {
+  deactivateModal(reviewModal);
+  const resolve = reviewResolve;
+  reviewResolve = null;
+  if (resolve) resolve(Boolean(result));
+}
 
 let dialogResolve = null;
 

@@ -1,12 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from importlib.util import find_spec
+
+
+if find_spec('yaml') is None:
+    raise RuntimeError(
+        'PyYAML is required for packaging. Build with '
+        r'.\.venv\Scripts\python.exe -m PyInstaller --clean --noconfirm SkillHub.spec'
+    )
+
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
     datas=[('static', 'static'), ('app.ico', '.')],
-    hiddenimports=['ddgs', 'requests', 'lxml', 'httpx', 'h2'],
+    hiddenimports=['yaml', 'ddgs', 'requests', 'lxml', 'httpx', 'h2'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
