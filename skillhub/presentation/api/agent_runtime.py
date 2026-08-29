@@ -409,6 +409,19 @@ class AgentRuntimeApiMixin:
             language=self.language,
         )
 
+    def _agent_conversation_context(self, session_id):
+        """Load persisted history for one chat without trusting client payloads."""
+        session_id = str(session_id or "").strip()
+        if not session_id:
+            return []
+        try:
+            loaded = self._chat_session_service().load_session(session_id)
+        except (AttributeError, OSError, TypeError, ValueError):
+            return []
+        session = loaded.get("session") if isinstance(loaded, dict) else None
+        messages = session.get("messages") if isinstance(session, dict) else None
+        return messages if isinstance(messages, list) else []
+
     def agent_start(self, goal, session_id="", project_path=""):
         if not self.deepseek_api_key:
             return {
@@ -422,6 +435,7 @@ class AgentRuntimeApiMixin:
             goal,
             session_id=session_id,
             project_path=project_path,
+            conversation_context=self._agent_conversation_context(session_id),
         )
 
     def agent_resume(self, run_id):

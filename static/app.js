@@ -4451,13 +4451,24 @@ function renderAgentRun(result) {
   }
 
   const memories = result.memory_used || [];
-  agentMemoryUsed.innerHTML = memories.length
-    ? memories.map(memory => `
+  const conversationContextCount = Number(result.conversation_context_count || 0);
+  const conversationContextItem = conversationContextCount > 0
+    ? `
+        <div class="agent-memory-item">
+          <span>${currentLanguage === 'zh' ? '会话上下文' : 'Conversation context'}</span>
+          <p>${currentLanguage === 'zh'
+            ? `已恢复同一会话最近 ${conversationContextCount} 条消息。`
+            : `Restored ${conversationContextCount} recent messages from this conversation.`}</p>
+        </div>`
+    : '';
+  const recalledMemoryItems = memories.map(memory => `
         <div class="agent-memory-item">
           <span>${escapeHtml(memory.kind || 'memory')}</span>
           <p>${escapeHtml(memory.summary || '')}</p>
-        </div>`).join('')
-    : `<div class="agent-empty-note">${currentLanguage === 'zh' ? '本次未检索到相关记忆。' : 'No relevant memory recalled.'}</div>`;
+        </div>`).join('');
+  agentMemoryUsed.innerHTML = conversationContextItem || recalledMemoryItems
+    ? `${conversationContextItem}${recalledMemoryItems}`
+    : `<div class="agent-empty-note">${currentLanguage === 'zh' ? '本次未恢复会话上下文或检索到相关记忆。' : 'No conversation context or relevant memory was recalled.'}</div>`;
   lucide.createIcons();
 }
 
