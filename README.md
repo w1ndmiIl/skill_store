@@ -2,7 +2,7 @@
 
 [English](README_EN.md) · [使用说明书](docs/SkillHub使用说明书.md) · [下载最新版](https://github.com/w1ndwill/skill_store/releases/latest) · [MIT License](LICENSE)
 
-SkillHub 是一个本地运行的 AI Skill 管理与同步工具。它用于集中保存可复用的开发规则、工作流和专业能力，并将它们按需应用到不同项目或 Codex、Claude Code、Cursor、Cline、OpenCode、Windsurf、Gemini CLI、VS Code/Copilot 等客户端。当前版本：**3.5.0**。
+SkillHub 是一个本地运行的 AI Skill 管理与同步工具。它用于集中保存可复用的开发规则、工作流和专业能力，并将它们按需应用到不同项目或 Codex、Claude Code、Cursor、Cline、OpenCode、Windsurf、Gemini CLI、VS Code/Copilot 等客户端。当前版本：**3.5.1**。
 
 用户可以在写入前查看变化、冲突和作用域重叠，在写入后安全回滚；导入体检和展示本地化不会直接改写第三方 Skill 的原始语义。SkillOps Agent 是可选辅助功能，用自然语言帮助查找、检查和维护 Skill，不取代手动管理与审批流程。
 
@@ -89,6 +89,8 @@ SkillHub 支持导入 Markdown、ZIP、标准 `SKILL.md` 文件夹和仓库集�
 ### 3. 可选 AI 辅助
 
 SkillOps Agent 是 SkillHub 中的辅助模块，用于在现有技能库和项目同步流程上完成 Skill 检索、检查、安装预览和维护。它不取代手动导入、编辑、分类或同步功能，也不提供任意终端访问。
+
+同一聊天会话内的后续消息会恢复受限且已脱敏的近期会话上下文，用于理解省略和指代；长期结构化记忆仍单独保存项目事实、偏好和已批准决策。当前消息优先，历史助手回复不能授权写入、联网或改变审批规则。
 
 ![SkillOps Agent 中文工作区](docs/screenshots/zh/skillops-agent.png)
 

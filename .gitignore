@@ -35,6 +35,7 @@ AGENTS.md
 !/tests/test_refactored_workflows.py
 !/tests/test_project_sync_ownership.py
 !/tests/test_skill_package_editor.py
+!/tests/test_agent_session_context.py
 
 # Legacy/runtime skills folder (active libraries live outside the repository)
 /skills/

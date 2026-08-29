@@ -2,7 +2,7 @@
 
 [中文](README.md) · [User manual](docs/SkillHub使用说明书.md) · [Download the latest release](https://github.com/w1ndwill/skill_store/releases/latest) · [MIT License](LICENSE)
 
-SkillHub is a local AI Skill management and synchronization tool. It keeps reusable development rules, workflows, and specialist capabilities in one place, then applies them selectively to projects or clients such as Codex, Claude Code, Cursor, Cline, OpenCode, Windsurf, Gemini CLI, and VS Code/Copilot. Current version: **3.5.0**.
+SkillHub is a local AI Skill management and synchronization tool. It keeps reusable development rules, workflows, and specialist capabilities in one place, then applies them selectively to projects or clients such as Codex, Claude Code, Cursor, Cline, OpenCode, Windsurf, Gemini CLI, and VS Code/Copilot. Current version: **3.5.1**.
 
 Users can review changes, conflicts, and scope overlaps before a write and safely roll back afterward. Import inspection and display localization do not rewrite the original semantics of third-party Skills. SkillOps Agent is optional assistance for finding, inspecting, and maintaining Skills; it does not replace manual management or approval.
 
@@ -87,6 +87,8 @@ Generated project content lives at:
 ### 3. Optional AI assistance
 
 SkillOps Agent is an auxiliary module built on top of SkillHub's existing library and project synchronization workflows. It can help find, inspect, preview, install, and maintain Skills, but it does not replace manual imports, editing, categorization, or synchronization and does not expose an unrestricted shell.
+
+Follow-up messages in the same chat restore a bounded and sanitized tail of that conversation so the Agent can resolve omissions and references. Structured long-term memory remains separate for project facts, preferences, and approved decisions. The current message takes precedence, and earlier assistant replies cannot authorize writes, network access, or approval-policy changes.
 
 ![SkillOps Agent English workspace](docs/screenshots/en/skillops-agent.png)
 
