@@ -8,7 +8,10 @@ import uuid
 
 import webview
 
-from skillhub.domain.imports import SKILL_IMPORT_MAX_TOTAL_BYTES
+from skillhub.domain.imports import (
+    SKILL_IMPORT_AI_COLLECTION_MAX_ITEMS,
+    SKILL_IMPORT_MAX_TOTAL_BYTES,
+)
 from skillhub.domain.naming import normalize_relative_path
 from skillhub.infrastructure.filesystem import (
     atomic_copy_file,
@@ -19,7 +22,6 @@ from skillhub.infrastructure.filesystem import (
     paths_overlap,
     safe_real_child_path,
 )
-
 
 class ImportsApiMixin:
     """Provide hash-bound import previews and transactional apply operations."""
@@ -105,7 +107,16 @@ class ImportsApiMixin:
             ai_used = False
             ai_error = ""
             if ai_requested:
-                if result["kind"] == "collection":
+                if (
+                    result["kind"] == "collection"
+                    and len(result["collection_items"])
+                    > SKILL_IMPORT_AI_COLLECTION_MAX_ITEMS
+                ):
+                    ai_error = (
+                        "Skipped for a large collection "
+                        f"({len(result['collection_items'])} members; "
+                        f"limit {SKILL_IMPORT_AI_COLLECTION_MAX_ITEMS})")
+                elif result["kind"] == "collection":
                     ai_errors = []
                     for collection_item in result["collection_items"]:
                         collection_item["ai_used"] = False
@@ -228,7 +239,16 @@ class ImportsApiMixin:
             display_translation_used = False
             display_translation_errors = []
             if display_translation_requested:
-                if result["kind"] == "collection":
+                if (
+                    result["kind"] == "collection"
+                    and len(result["collection_items"])
+                    > SKILL_IMPORT_AI_COLLECTION_MAX_ITEMS
+                ):
+                    display_translation_errors.append(
+                        "Skipped for a large collection "
+                        f"({len(result['collection_items'])} members; "
+                        f"limit {SKILL_IMPORT_AI_COLLECTION_MAX_ITEMS})")
+                elif result["kind"] == "collection":
                     for collection_item in result["collection_items"]:
                         if collection_item.get("action") == "duplicate":
                             continue

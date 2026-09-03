@@ -7,6 +7,7 @@ import shutil
 import time
 import uuid
 from pathlib import PurePosixPath
+from urllib.parse import urlsplit
 
 import requests
 
@@ -22,6 +23,10 @@ from skillhub.infrastructure.filesystem import (
     safe_real_child_path,
 )
 from skillhub.settings import AGENT_REMOTE_COLLECTIONS_DIR
+
+
+REMOTE_COLLECTION_ARCHIVE_MAX_BYTES = 100 * 1024 * 1024
+REMOTE_COLLECTION_DOWNLOAD_ATTEMPTS = 3
 
 
 class AgentRemoteApiMixin:
@@ -40,24 +45,48 @@ class AgentRemoteApiMixin:
         return AGENT_REMOTE_COLLECTIONS_DIR
 
     @staticmethod
-    def _validated_agent_github_source(repository, reference="main"):
-        repository = str(repository or "").strip().rstrip("/")
-        match = re.fullmatch(
-            r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?",
-            repository,
-            flags=re.IGNORECASE,
-        )
-        if not match:
+    def _validated_agent_github_source(repository, reference=""):
+        requested = str(repository or "").strip()
+        parsed = urlsplit(requested)
+        parts = [part for part in parsed.path.split("/") if part]
+        tree_reference = ""
+        if (
+            parsed.scheme.lower() != "https"
+            or parsed.netloc.lower() != "github.com"
+            or parsed.query
+            or parsed.fragment
+            or len(parts) not in (2, 4)
+            or (len(parts) == 4 and parts[2].lower() != "tree")
+        ):
             raise ValueError(
-                "Only canonical public GitHub repository URLs are supported"
+                "Only public GitHub repository or /tree/<ref> URLs are supported"
             )
-        reference = str(reference or "main").strip()
+        owner = parts[0]
+        repository_name = parts[1]
+        if repository_name.lower().endswith(".git"):
+            repository_name = repository_name[:-4]
+        if len(parts) == 4:
+            tree_reference = parts[3]
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", owner) or not re.fullmatch(
+            r"[A-Za-z0-9_.-]+",
+            repository_name,
+        ):
+            raise ValueError(
+                "Only public GitHub repository or /tree/<ref> URLs are supported"
+            )
+        supplied_reference = str(reference or "").strip()
+        if (
+            tree_reference
+            and supplied_reference not in ("", "main", tree_reference)
+        ):
+            raise ValueError("GitHub URL reference conflicts with the ref argument")
+        reference = tree_reference or supplied_reference or "main"
         if (
             not re.fullmatch(r"[A-Za-z0-9._/-]{1,120}", reference)
             or ".." in reference
         ):
             raise ValueError("Invalid Git reference")
-        owner, repository_name = match.groups()
+        repository = f"https://github.com/{owner}/{repository_name}"
         return repository, owner, repository_name, reference
 
     def _tool_preview_remote_skill_install(self, arguments):
@@ -65,7 +94,7 @@ class AgentRemoteApiMixin:
             repository, owner, repository_name, reference = (
                 self._validated_agent_github_source(
                     arguments["repository"],
-                    arguments.get("ref", "main"),
+                    arguments.get("ref", ""),
                 )
             )
         except ValueError as error:
@@ -181,7 +210,7 @@ class AgentRemoteApiMixin:
             repository, owner, repository_name, reference = (
                 self._validated_agent_github_source(
                     arguments["repository"],
-                    arguments.get("ref", "main"),
+                    arguments.get("ref", ""),
                 )
             )
         except ValueError as error:
@@ -190,30 +219,72 @@ class AgentRemoteApiMixin:
         archive_url = (
             f"https://codeload.github.com/{owner}/{repository_name}/zip/{reference}"
         )
-        try:
-            response = requests.get(
-                archive_url,
-                headers={"User-Agent": "SkillHub-SkillOps-Agent/1.0"},
-                timeout=45,
-            )
-        except requests.exceptions.RequestException as error:
+        archive_bytes = b""
+        last_error = None
+        for _attempt in range(REMOTE_COLLECTION_DOWNLOAD_ATTEMPTS):
+            response = None
+            try:
+                response = requests.get(
+                    archive_url,
+                    headers={"User-Agent": "SkillHub-SkillOps-Agent/1.0"},
+                    timeout=(15, 120),
+                    stream=True,
+                )
+                if response.status_code != 200:
+                    return {
+                        "error": (
+                            f"GitHub repository archive returned HTTP "
+                            f"{response.status_code}"
+                        )
+                    }
+                headers = getattr(response, "headers", {})
+                content_length = (
+                    headers.get("Content-Length", "")
+                    if hasattr(headers, "get")
+                    else ""
+                )
+                if (
+                    isinstance(content_length, (str, int))
+                    and str(content_length).isdigit()
+                    and int(content_length) > REMOTE_COLLECTION_ARCHIVE_MAX_BYTES
+                ):
+                    return {"error": "Repository archive exceeds 100 MB"}
+                chunks = []
+                total_bytes = 0
+                if getattr(response.__class__, "iter_content", None):
+                    iterator = response.iter_content(chunk_size=1024 * 1024)
+                else:
+                    iterator = (response.content,)
+                for chunk in iterator:
+                    if not chunk:
+                        continue
+                    total_bytes += len(chunk)
+                    if total_bytes > REMOTE_COLLECTION_ARCHIVE_MAX_BYTES:
+                        return {"error": "Repository archive exceeds 100 MB"}
+                    chunks.append(chunk)
+                archive_bytes = b"".join(chunks)
+                if archive_bytes:
+                    break
+                last_error = ValueError("Repository archive is empty")
+            except (requests.exceptions.RequestException, ValueError) as error:
+                last_error = error
+                archive_bytes = b""
+            finally:
+                close = (
+                    getattr(response.__class__, "close", None)
+                    if response is not None
+                    else None
+                )
+                if close:
+                    response.close()
+        if not archive_bytes:
             return {
                 "ok": False,
                 "error": {
-                    "type": type(error).__name__,
-                    "message": str(error),
+                    "type": type(last_error).__name__ if last_error else "DownloadError",
+                    "message": str(last_error or "Repository archive is empty"),
                 },
             }
-        if response.status_code != 200:
-            return {
-                "error": (
-                    f"GitHub repository archive returned HTTP "
-                    f"{response.status_code}"
-                )
-            }
-        archive_bytes = response.content
-        if not archive_bytes or len(archive_bytes) > 25 * 1024 * 1024:
-            return {"error": "Repository archive is empty or exceeds 25 MB"}
 
         download_root = self._agent_remote_collection_root()
         if not download_root:
@@ -223,10 +294,15 @@ class AgentRemoteApiMixin:
         if not staged_download:
             return {"error": "Unsafe remote collection preview path"}
         archive_path = os.path.join(staged_download, f"{repository_name}.zip")
+        collection_path = os.path.join(staged_download, repository_name)
         os.makedirs(staged_download, exist_ok=False)
         try:
             atomic_write_bytes(archive_path, archive_bytes)
-            preview = self.preview_skill_import(archive_path)
+            self._safe_extract_repository_skill_collection_zip(
+                archive_path,
+                collection_path,
+            )
+            preview = self.preview_skill_import(collection_path)
         finally:
             shutil.rmtree(staged_download, ignore_errors=True)
 

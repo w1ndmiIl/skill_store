@@ -328,6 +328,19 @@
           <i data-lucide="x" style="width:18px;height:18px;"></i>
         </button>
       </header>
+      <div id="collection-category-editor" class="collection-category-editor">
+        <div class="collection-category-heading">
+          <div>
+            <strong id="collection-category-label">集合分类</strong>
+            <span id="collection-category-hint">独立于子技能，仅用于技能库筛选。</span>
+          </div>
+          <button id="collection-category-add" type="button" class="btn btn-secondary skill-category-add">
+            <i data-lucide="plus"></i>
+            <span id="collection-category-add-label">新增类别</span>
+          </button>
+        </div>
+        <div id="collection-category-options" class="collection-category-options" role="listbox" aria-labelledby="collection-category-label"></div>
+      </div>
       <div class="collection-members-list" id="collection-members-list"></div>
       <footer class="modal-header collection-modal-footer">
         <span id="collection-modal-hint">停用子技能不会删除文件；下次同步时生效。</span>

@@ -72,7 +72,15 @@ class FrontendUiQualityTests(unittest.TestCase):
         self.assertIn("showStructuredReview", JS)
         self.assertIn('id="editor-dirty-indicator"', HTML)
         self.assertIn("editorInitialSnapshot", JS)
-        self.assertIn("category-more", JS)
+        self.assertNotIn("category-more", JS)
+        self.assertIn("uniqueCanonicalCategories.map(renderPill)", JS)
+        for category in (
+            "Design & Creative",
+            "Writing",
+            "Knowledge Management",
+            "Research & Academia",
+        ):
+            self.assertIn(category, JS)
         self.assertIn("getSkillListIcon", JS)
         self.assertIn("@media (prefers-reduced-motion: reduce)", CSS)
         self.assertIn("editorSourceBar.classList.add('viewer-workbench')", JS)
