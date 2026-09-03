@@ -14,7 +14,6 @@ let pendingSyncSummary = null;
 let pendingSyncRequestId = 0;
 let pendingSyncTimer = null;
 const modalReturnFocus = new WeakMap();
-let categoryResizeTimer = null;
 
 // i18n & Theme State
 let currentLanguage = 'zh';
@@ -103,6 +102,12 @@ const collectionModalTitle = document.getElementById('collection-modal-title');
 const collectionModalSummary = document.getElementById('collection-modal-summary');
 const collectionMembersList = document.getElementById('collection-members-list');
 const collectionModalHint = document.getElementById('collection-modal-hint');
+const collectionCategoryEditor = document.getElementById('collection-category-editor');
+const collectionCategoryLabel = document.getElementById('collection-category-label');
+const collectionCategoryOptions = document.getElementById('collection-category-options');
+const collectionCategoryAdd = document.getElementById('collection-category-add');
+const collectionCategoryAddLabel = document.getElementById('collection-category-add-label');
+const collectionCategoryHint = document.getElementById('collection-category-hint');
 const navLibrary = document.getElementById('nav-library');
 const navSkillCount = document.getElementById('nav-skill-count');
 const workspaceKicker = document.getElementById('workspace-kicker');
@@ -260,6 +265,7 @@ const locales = {
     statusUpdated: '有更新',
     statusPendingMount: '待装载',
     statusPendingUnmount: '待从项目移除',
+    statusPartiallyEnabled: '部分启用',
     statusProjectCustom: '项目自定义 · 已保留',
     statusUnloaded: '未装载',
     statusReadonly: '未选择项目',
@@ -286,6 +292,10 @@ const locales = {
     editCategoryDeleteEmpty: '这个类别没有可修改的全局 Skill，无法删除',
     editCategoryDeleteSuccess: '类别已删除，相关 Skill 已归入未分类',
     editCategoryHint: '保存时会同步更新 Skill 文件中的 category 字段',
+    collectionCategoryLabel: '集合分类',
+    collectionCategoryAdd: '新增类别',
+    collectionCategoryHint: '独立于子技能，仅用于技能库筛选。',
+    collectionCategorySaved: '集合分类已更新',
     editSourceSkillHint: 'name 标识 Skill；description 参与隐式匹配；正文是选中后加载的执行指令',
     editSourceOpenaiHint: 'OpenAI/Codex 的界面元数据与调用策略',
     editOpenaiExisting: '已存在',
@@ -425,6 +435,7 @@ const locales = {
     statusUpdated: 'Updated',
     statusPendingMount: 'Pending Mount',
     statusPendingUnmount: 'Pending Project Removal',
+    statusPartiallyEnabled: 'Partially Enabled',
     statusProjectCustom: 'Project Custom · Retained',
     statusUnloaded: 'Unloaded',
     statusReadonly: 'No Project Selected',
@@ -451,6 +462,10 @@ const locales = {
     editCategoryDeleteEmpty: 'No editable global Skill uses this category',
     editCategoryDeleteSuccess: 'Category deleted; related Skills are now uncategorized',
     editCategoryHint: 'Saving updates the category field in the Skill file',
+    collectionCategoryLabel: 'Collection category',
+    collectionCategoryAdd: 'Add category',
+    collectionCategoryHint: 'Independent of child Skills; only affects library filtering.',
+    collectionCategorySaved: 'Collection category updated',
     editSourceSkillHint: 'name identifies the Skill; description drives implicit matching; the body contains instructions loaded after selection',
     editSourceOpenaiHint: 'OpenAI/Codex UI metadata and invocation policy',
     editOpenaiExisting: 'Existing',
@@ -621,6 +636,10 @@ const categoryTranslations = {
     'Workflow': '工作流程',
     'Engineering Efficiency': '工程效率',
     'Engineering Quality': '工程质量',
+    'Design & Creative': '设计创作',
+    'Writing': '文本写作',
+    'Knowledge Management': '知识管理',
+    'Research & Academia': '科研学术',
     'Team Collaboration': '团队协作',
     'Frontend Development': '前端开发',
     'Code Analysis': '代码分析',
@@ -632,6 +651,10 @@ const categoryTranslations = {
     '工作流': '工作流程',
     '未分类': '未分类',
     '文本优化': '文本优化',
+    '设计创作': '设计创作',
+    '文本写作': '文本写作',
+    '知识管理': '知识管理',
+    '科研学术': '科研学术',
     '安全工程': '安全工程'
   },
   en: {
@@ -640,6 +663,10 @@ const categoryTranslations = {
     '工作流': 'Workflow',
     '工程效率': 'Engineering Efficiency',
     '工程质量': 'Engineering Quality',
+    '设计创作': 'Design & Creative',
+    '文本写作': 'Writing',
+    '知识管理': 'Knowledge Management',
+    '科研学术': 'Research & Academia',
     '团队协作': 'Team Collaboration',
     '前端开发': 'Frontend Development',
     '代码分析': 'Code Analysis',
@@ -650,6 +677,10 @@ const categoryTranslations = {
     'Workflow': 'Workflow',
     'Uncategorized': 'Uncategorized',
     'Text Optimization': 'Text Optimization',
+    'Design & Creative': 'Design & Creative',
+    'Writing': 'Writing',
+    'Knowledge Management': 'Knowledge Management',
+    'Research & Academia': 'Research & Academia',
     'Security Engineering': 'Security Engineering'
   }
 };
@@ -754,6 +785,9 @@ function applyLanguage(lang) {
   skillCategoryAddLabel.textContent = t.editCategoryAdd;
   skillCategoryDeleteLabel.textContent = t.editCategoryDelete;
   skillCategoryHint.textContent = t.editCategoryHint;
+  collectionCategoryLabel.textContent = t.collectionCategoryLabel;
+  collectionCategoryAddLabel.textContent = t.collectionCategoryAdd;
+  collectionCategoryHint.textContent = t.collectionCategoryHint;
   editorOpenaiHintTitle.textContent = t.editOpenaiHintTitle;
   editorOpenaiHintBody.textContent = t.editOpenaiHintBody;
   editorOpenaiModeForm.textContent = t.openaiModeForm;
@@ -1268,6 +1302,7 @@ function buildDisplaySkills() {
     display.push({
       ...primary,
       ...displayMetadata,
+      category: primary.collection?.category || 'Uncategorized',
       filename: `@collection:${collectionId}`,
       emoji: '🧰',
       tags,
@@ -1433,6 +1468,10 @@ function getCanonicalCategory(skill) {
   if (cat === '工作流') return 'Workflow';
   if (cat === '工程效率') return 'Engineering Efficiency';
   if (cat === '工程质量') return 'Engineering Quality';
+  if (cat === '设计创作') return 'Design & Creative';
+  if (cat === '文本写作') return 'Writing';
+  if (cat === '知识管理') return 'Knowledge Management';
+  if (cat === '科研学术') return 'Research & Academia';
   if (cat === '团队协作') return 'Team Collaboration';
   if (cat === '前端开发') return 'Frontend Development';
   if (cat === '代码分析') return 'Code Analysis';
@@ -1456,6 +1495,10 @@ function getSkillListIcon(skill) {
     Workflow: 'git-branch',
     'Engineering Efficiency': 'gauge',
     'Engineering Quality': 'shield-check',
+    'Design & Creative': 'palette',
+    'Writing': 'pen-line',
+    'Knowledge Management': 'library',
+    'Research & Academia': 'microscope',
     'Team Collaboration': 'users',
     'Frontend Development': 'monitor-smartphone',
     'Code Analysis': 'scan-search',
@@ -1475,30 +1518,37 @@ function renderCategoryFilterBar() {
     categoriesSet.add(getCanonicalCategory(skill));
   });
   
-  const uniqueCanonicalCategories = Array.from(categoriesSet).sort();
+  const categoryOrder = [
+    'Development',
+    'Engineering Efficiency',
+    'Engineering Quality',
+    'Design & Creative',
+    'Writing',
+    'Knowledge Management',
+    'Research & Academia',
+    'Team Collaboration',
+  ];
+  const uniqueCanonicalCategories = Array.from(categoriesSet).sort((left, right) => {
+    const leftIndex = categoryOrder.indexOf(left);
+    const rightIndex = categoryOrder.indexOf(right);
+    if (leftIndex >= 0 || rightIndex >= 0) {
+      return (leftIndex < 0 ? Number.MAX_SAFE_INTEGER : leftIndex)
+        - (rightIndex < 0 ? Number.MAX_SAFE_INTEGER : rightIndex);
+    }
+    return getLocalizedCategory(left).localeCompare(
+      getLocalizedCategory(right),
+      currentLanguage,
+    );
+  });
   
   const allLabel = currentLanguage === 'zh' ? '全部' : 'All';
-  const visibleLimit = window.innerWidth <= 820 ? 3 : window.innerWidth <= 1060 ? 4 : 7;
-  let visibleCategories = uniqueCanonicalCategories.slice(0, visibleLimit);
-  if (activeCategoryFilter && !visibleCategories.includes(activeCategoryFilter)) {
-    visibleCategories = [...visibleCategories.slice(0, Math.max(0, visibleLimit - 1)), activeCategoryFilter];
-  }
-  const hiddenCategories = uniqueCanonicalCategories.filter(category => !visibleCategories.includes(category));
   const renderPill = canonicalCat => {
     const localizedLabel = getLocalizedCategory(canonicalCat);
     const isActive = activeCategoryFilter === canonicalCat;
     return `<button class="category-pill ${isActive ? 'active' : ''}" onclick="handleSelectCategory('${canonicalCat.replace(/'/g, "\\'")}')">${escapeHtml(localizedLabel)}</button>`;
   };
   let html = `<button class="category-pill ${activeCategoryFilter === null ? 'active' : ''}" onclick="handleSelectCategory(null)">${allLabel}</button>`;
-  html += visibleCategories.map(renderPill).join('');
-  if (hiddenCategories.length) {
-    const hiddenActive = hiddenCategories.includes(activeCategoryFilter);
-    html += `
-      <details class="category-more ${hiddenActive ? 'active' : ''}">
-        <summary>${currentLanguage === 'zh' ? '更多' : 'More'} <i data-lucide="chevron-down" aria-hidden="true"></i></summary>
-        <div class="category-more-menu">${hiddenCategories.map(renderPill).join('')}</div>
-      </details>`;
-  }
+  html += uniqueCanonicalCategories.map(renderPill).join('');
   
   categoryFilterBar.innerHTML = html;
   lucide.createIcons();
@@ -1506,16 +1556,10 @@ function renderCategoryFilterBar() {
 
 // Handle category select
 window.handleSelectCategory = function(canonicalCat) {
-  document.querySelector('.category-more')?.removeAttribute('open');
   activeCategoryFilter = canonicalCat;
   renderCategoryFilterBar();
   renderSkillsGrid();
 };
-
-window.addEventListener('resize', () => {
-  clearTimeout(categoryResizeTimer);
-  categoryResizeTimer = setTimeout(renderCategoryFilterBar, 120);
-});
 
 // COLLECTION_PROJECT_STATE_HELPER_START
 function resolveCollectionProjectState(
@@ -1630,6 +1674,7 @@ function renderSkillsGrid() {
 
     let statusHTML = '';
     let isChecked = false;
+    let isPartiallyChecked = false;
 
     if (skill.project_only) {
       statusHTML = `<span class="status-badge library"><span class="status-dot"></span>${currentLanguage === 'zh' ? '项目独有 · 只读' : 'Project-only · Read-only'}</span>`;
@@ -1647,6 +1692,10 @@ function renderSkillsGrid() {
           detachedSkills
         );
         isLocallyEnabled = collectionState.isLocallyEnabled;
+        isPartiallyChecked = isCollectionPartiallyEnabled(
+          skill.collection_members,
+          enabledSkills
+        );
         physicalStatus = collectionState.physicalStatus;
         isManaged = collectionState.isManaged;
         isDetached = collectionState.isDetached;
@@ -1663,7 +1712,9 @@ function renderSkillsGrid() {
         }
       } else {
         isChecked = false;
-        if (isDetached && (physicalStatus === 'synced' || physicalStatus === 'out_of_sync')) {
+        if (isPartiallyChecked) {
+          statusHTML = `<span class="status-badge pending-mount"><span class="status-dot"></span>${locales[currentLanguage].statusPartiallyEnabled}</span>`;
+        } else if (isDetached && (physicalStatus === 'synced' || physicalStatus === 'out_of_sync')) {
           const retainedHint = currentLanguage === 'zh'
             ? '该项目副本曾被修改；SkillHub 已停止管理并保留它。'
             : 'This project copy was modified; SkillHub stopped managing it and retained it.';
@@ -1801,6 +1852,8 @@ function renderSkillsGrid() {
           </label>` : ''}
         <div class="row-secondary-actions">${actionButtons}</div>
       </div>`;
+    const mountToggle = card.querySelector('.js-toggle-skill');
+    if (mountToggle && isPartiallyChecked) mountToggle.indeterminate = true;
     card.title = cardTitle;
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
@@ -2065,12 +2118,116 @@ function getCollectionDisplaySkill(collectionId) {
   );
 }
 
+function populateCollectionCategoryOptions(selectedCategory = '') {
+  const normalized = isDefaultSkillCategory(selectedCategory)
+    ? ''
+    : String(selectedCategory || '').trim();
+  const categories = Array.from(new Set([
+    ...skills.map(skill => String(skill.category || '').trim()),
+    normalized,
+  ].filter(category => category && !isDefaultSkillCategory(category))))
+    .sort((left, right) => left.localeCompare(right, currentLanguage));
+  const options = ['', ...categories];
+  collectionCategoryOptions.innerHTML = options.map(category => {
+    const active = category === normalized;
+    const label = category || locales[currentLanguage].editCategoryUncategorized;
+    return `<button type="button" class="collection-category-option ${active ? 'active' : ''}" data-category="${escapeHtml(category)}" role="option" aria-selected="${active}">${escapeHtml(label)}</button>`;
+  }).join('');
+}
+
+async function saveCollectionCategory(category) {
+  const collectionId = activeCollectionId;
+  if (!collectionId || currentProjectPath) return;
+  const normalized = isDefaultSkillCategory(category)
+    ? ''
+    : String(category || '').trim();
+  collectionCategoryOptions.classList.add('busy');
+  collectionCategoryAdd.disabled = true;
+  try {
+    const result = await window.pywebview.api.set_collection_category(
+      collectionId,
+      normalized,
+    );
+    if (result.error) throw new Error(result.error);
+    await fetchSkills();
+    if (activeCollectionId === collectionId) openCollectionModal(collectionId);
+    showToast(locales[currentLanguage].collectionCategorySaved, 'success');
+  } catch (error) {
+    const collection = getCollectionDisplaySkill(collectionId);
+    populateCollectionCategoryOptions(collection?.category || '');
+    showToast(
+      (currentLanguage === 'zh'
+        ? '更新集合分类失败: '
+        : 'Failed to update collection category: ') + error,
+      'error'
+    );
+  } finally {
+    collectionCategoryOptions.classList.remove('busy');
+    collectionCategoryAdd.disabled = false;
+  }
+}
+
+collectionCategoryOptions.addEventListener('click', event => {
+  const option = event.target.closest('.collection-category-option');
+  if (!option || option.classList.contains('active')) return;
+  saveCollectionCategory(option.dataset.category || '');
+});
+
+collectionCategoryAdd.addEventListener('click', async () => {
+  const t = locales[currentLanguage];
+  const category = await requestTextInput({
+    title: t.editCategoryAddTitle,
+    message: t.editCategoryAddMessage,
+    value: '',
+    placeholder: t.editCategoryAddPlaceholder,
+    confirmText: t.editCategoryAdd,
+  });
+  if (category === null) return;
+  const normalized = String(category).trim();
+  if (!normalized || isDefaultSkillCategory(normalized)) return;
+  await saveCollectionCategory(normalized);
+});
+
+// COLLECTION_MEMBER_PROJECT_STATE_HELPER_START
+function resolveCollectionMemberProjectState(member, projectEnabledSkills) {
+  const selected = projectEnabledSkills.has(member.filename);
+  const available = Boolean(member.collection?.effective_enabled);
+  return {
+    selected,
+    available,
+    effectiveEnabled: selected && available
+  };
+}
+
+function isCollectionPartiallyEnabled(collectionMembers, projectEnabledSkills) {
+  const activeMembers = (Array.isArray(collectionMembers) ? collectionMembers : [])
+    .filter(member => member.collection?.effective_enabled);
+  const enabledCount = activeMembers.filter(
+    member => projectEnabledSkills.has(member.filename)
+  ).length;
+  return enabledCount > 0 && enabledCount < activeMembers.length;
+}
+
+function updateProjectCollectionMemberSelection(
+  projectEnabledSkills,
+  filename,
+  enabled
+) {
+  if (enabled) projectEnabledSkills.add(filename);
+  else projectEnabledSkills.delete(filename);
+}
+// COLLECTION_MEMBER_PROJECT_STATE_HELPER_END
+
 function openCollectionModal(collectionId) {
   const collectionSkill = getCollectionDisplaySkill(collectionId);
   if (!collectionSkill) return;
-  const readOnly = !currentProjectPath;
+  const projectMode = Boolean(currentProjectPath);
   activeCollectionId = collectionId;
   collectionModalTitle.textContent = collectionSkill.title;
+  collectionCategoryEditor.hidden = projectMode;
+  populateCollectionCategoryOptions(collectionSkill.category || '');
+  collectionCategoryOptions.classList.toggle('busy', projectMode);
+  collectionCategoryAdd.disabled = projectMode;
   const hasPrimary = collectionSkill.collection_members.some(
     member => member.filename === collectionId
   );
@@ -2078,19 +2235,15 @@ function openCollectionModal(collectionId) {
   const controllerEnabled = collectionSkill.collection_controller_enabled;
   const childCount = collectionSkill.collection_child_count;
   collectionModalSummary.textContent = currentLanguage === 'zh'
-    ? `${hasPrimary ? '1 个主控 + ' : ''}${childCount} 个子技能；${readOnly ? '可分别发布到所选全局目标' : '主控关闭时整组暂停'}`
-    : `${hasPrimary ? '1 controller + ' : ''}${childCount} child skills; ${readOnly ? 'each can publish to selected global targets' : 'the controller pauses the whole collection'}`;
-  collectionModalHint.textContent = readOnly
+    ? `${hasPrimary ? '1 个主控 + ' : ''}${childCount} 个子技能；${projectMode ? '当前项目独立配置' : '管理集合全局可用性和发布目标'}`
+    : `${hasPrimary ? '1 controller + ' : ''}${childCount} child skills; ${projectMode ? 'configured independently for this project' : 'manage collection availability and global targets'}`;
+  collectionModalHint.textContent = projectMode
     ? (currentLanguage === 'zh'
-      ? '这里可以为每个子 Skill 单独选择全局目标，与项目启用状态互不影响。'
-      : 'Each child Skill can choose its own global targets independently of project enablement.')
+      ? '这里的开关只影响当前项目；下次同步时应用。全局停用的成员需返回技能库重新开启。'
+      : 'These switches affect only this project and apply on the next sync. Re-enable globally unavailable members from the library.')
     : currentLanguage === 'zh'
-      ? (controller && !controllerEnabled
-        ? '主控已关闭：子技能选择已保留，但不会生效；下次同步会从项目移除整组。'
-        : '停用不会删除文件；项目将在下次同步时应用变更。')
-      : (controller && !controllerEnabled
-        ? 'Controller is off: child choices are preserved but inactive; the next sync removes the collection.'
-        : 'Disabling keeps source files; the next sync applies the change to projects.');
+      ? '“可用”开关影响所有项目；“全局目标”按钮只管理该成员发布到哪些 Agent。'
+      : 'Availability switches affect every project; global-target buttons only control where each member is published.';
 
   const orderedMembers = [...collectionSkill.collection_members].sort((left, right) => {
     if (left.collection?.is_controller) return -1;
@@ -2101,19 +2254,26 @@ function openCollectionModal(collectionId) {
     const displayFilename = member.display_filename || member.filename;
     const title = member.display_title || member.title;
     const description = member.display_description || member.description;
-    const enabled = Boolean(member.collection?.enabled);
-    const effectiveEnabled = Boolean(member.collection?.effective_enabled);
+    const globallyEnabled = Boolean(member.collection?.enabled);
+    const globallyEffective = Boolean(member.collection?.effective_enabled);
+    const projectState = resolveCollectionMemberProjectState(member, enabledSkills);
     const isController = Boolean(member.collection?.is_controller);
     const pausedByController = Boolean(controller && !controllerEnabled && !isController);
-    const stateText = isController
-      ? (enabled
-        ? (currentLanguage === 'zh' ? '主控开启' : 'Controller on')
-        : (currentLanguage === 'zh' ? '主控关闭' : 'Controller off'))
-      : pausedByController && enabled
-        ? (currentLanguage === 'zh' ? '选择已保留' : 'Choice preserved')
-        : effectiveEnabled
-          ? (currentLanguage === 'zh' ? '启用' : 'On')
-          : (currentLanguage === 'zh' ? '停用' : 'Off');
+    const stateText = projectMode
+      ? !projectState.available
+        ? (currentLanguage === 'zh' ? '全局停用' : 'Globally off')
+        : projectState.selected
+          ? (currentLanguage === 'zh' ? '当前项目已启用' : 'Enabled here')
+          : (currentLanguage === 'zh' ? '当前项目未启用' : 'Disabled here')
+      : isController
+        ? (globallyEnabled
+          ? (currentLanguage === 'zh' ? '主控可用' : 'Controller available')
+          : (currentLanguage === 'zh' ? '主控停用' : 'Controller off'))
+        : pausedByController && globallyEnabled
+          ? (currentLanguage === 'zh' ? '选择已保留' : 'Choice preserved')
+          : globallyEffective
+            ? (currentLanguage === 'zh' ? '全局可用' : 'Available')
+            : (currentLanguage === 'zh' ? '全局停用' : 'Unavailable');
     const smart = getSmartEmojiAndTags(member);
     const globalState = member.codex_global_status || 'disabled';
     const globalEnabled = member.codex_global_enabled;
@@ -2134,7 +2294,7 @@ function openCollectionModal(collectionId) {
           ? 'circle-dot-dashed'
         : globalEnabled ? 'circle-check' : 'globe-2';
     return `
-      <div class="collection-member ${!readOnly && effectiveEnabled ? 'enabled' : ''} ${!readOnly && pausedByController ? 'controller-paused' : ''} ${isController ? 'collection-controller' : ''}" data-filename="${escapeHtml(member.filename)}">
+      <div class="collection-member ${(projectMode ? projectState.effectiveEnabled : globallyEffective) ? 'enabled' : ''} ${pausedByController ? 'controller-paused' : ''} ${isController ? 'collection-controller' : ''}" data-filename="${escapeHtml(member.filename)}">
         <div class="collection-member-main">
           <span class="collection-member-emoji">${escapeHtml(smart.emoji)}</span>
           <div class="collection-member-copy">
@@ -2147,13 +2307,18 @@ function openCollectionModal(collectionId) {
           <button type="button" class="btn btn-secondary btn-icon js-view-collection-member" data-filename="${escapeHtml(member.filename)}" title="${currentLanguage === 'zh' ? '查看文档' : 'View docs'}">
             <i data-lucide="eye" style="width:14px;height:14px;"></i>
           </button>
-          ${readOnly ? `
+          ${projectMode ? `
+            <span class="collection-member-state">${stateText}</span>
+            <label class="switch" title="${currentLanguage === 'zh' ? '当前项目启用状态' : 'Enable for this project'}">
+              <input type="checkbox" class="js-collection-member-toggle" data-filename="${escapeHtml(member.filename)}" aria-label="${currentLanguage === 'zh' ? `在当前项目启用 ${escapeHtml(displayFilename)}` : `Enable ${escapeHtml(displayFilename)} for this project`}" ${projectState.selected ? 'checked' : ''} ${!projectState.available ? 'disabled' : ''}>
+              <span class="slider"></span>
+            </label>` : `
             <button type="button" class="codex-global-button compact ${escapeHtml(globalState)} js-collection-global-action" data-filename="${escapeHtml(member.filename)}" data-state="${escapeHtml(globalState)}" ${globalState === 'conflict' ? 'disabled' : ''}>
               <i data-lucide="${globalActionIcon}"></i><span>${escapeHtml(globalActionLabel)}</span>
-            </button>` : `
+            </button>
             <span class="collection-member-state">${stateText}</span>
-            <label class="switch">
-              <input type="checkbox" class="js-collection-member-toggle" data-filename="${escapeHtml(member.filename)}" ${enabled ? 'checked' : ''} ${pausedByController ? 'disabled' : ''}>
+            <label class="switch" title="${currentLanguage === 'zh' ? '集合全局可用性' : 'Collection-wide availability'}">
+              <input type="checkbox" class="js-collection-availability-toggle" data-filename="${escapeHtml(member.filename)}" aria-label="${currentLanguage === 'zh' ? `设置 ${escapeHtml(displayFilename)} 的集合全局可用性` : `Set collection-wide availability for ${escapeHtml(displayFilename)}`}" ${globallyEnabled ? 'checked' : ''} ${pausedByController ? 'disabled' : ''}>
               <span class="slider"></span>
             </label>`}
         </div>
@@ -2162,9 +2327,9 @@ function openCollectionModal(collectionId) {
   activateModal(
     collectionModal,
     collectionModal.querySelector(
-      readOnly
-        ? '.js-collection-global-action:not([disabled])'
-        : '.js-collection-member-toggle:not([disabled])'
+      projectMode
+        ? '.js-collection-member-toggle:not([disabled])'
+        : '.js-collection-global-action:not([disabled]), .js-collection-availability-toggle:not([disabled])'
     )
   );
   lucide.createIcons();
@@ -2175,7 +2340,8 @@ function closeCollectionModal() {
   activeCollectionId = null;
 }
 
-collectionMembersList.addEventListener('change', async event => {
+// COLLECTION_PROJECT_MEMBER_TOGGLE_START
+collectionMembersList.addEventListener('change', event => {
   if (!event.target.matches('.js-collection-member-toggle')) return;
   if (!currentProjectPath) {
     const collectionId = activeCollectionId;
@@ -2191,10 +2357,54 @@ collectionMembersList.addEventListener('change', async event => {
   const input = event.target;
   const filename = input.dataset.filename;
   const enabled = input.checked;
-  const collectionBefore = getCollectionDisplaySkill(activeCollectionId);
-  const memberBefore = collectionBefore?.collection_members?.find(
+  const collection = getCollectionDisplaySkill(activeCollectionId);
+  const member = collection?.collection_members?.find(
     item => item.filename === filename
   );
+  if (!member?.collection?.effective_enabled) {
+    const collectionId = activeCollectionId;
+    if (collectionId) openCollectionModal(collectionId);
+    showToast(
+      currentLanguage === 'zh'
+        ? '该成员已在集合中全局停用，请返回技能库重新开启。'
+        : 'This member is globally unavailable; re-enable it from the library.',
+      'warning'
+    );
+    return;
+  }
+  updateProjectCollectionMemberSelection(enabledSkills, filename, enabled);
+  syncBtn.classList.add('active');
+  renderSkillsGrid();
+  queuePendingSyncSummary();
+  const collectionId = activeCollectionId;
+  if (collectionId) openCollectionModal(collectionId);
+  const displayFilename = member.display_filename || filename;
+  showToast(
+    currentLanguage === 'zh'
+      ? `${displayFilename} 已在当前项目${enabled ? '启用' : '停用'}`
+      : `${displayFilename} ${enabled ? 'enabled' : 'disabled'} for this project`,
+    'success'
+  );
+});
+// COLLECTION_PROJECT_MEMBER_TOGGLE_END
+
+// COLLECTION_AVAILABILITY_TOGGLE_START
+collectionMembersList.addEventListener('change', async event => {
+  if (!event.target.matches('.js-collection-availability-toggle')) return;
+  if (currentProjectPath) {
+    const collectionId = activeCollectionId;
+    if (collectionId) openCollectionModal(collectionId);
+    showToast(
+      currentLanguage === 'zh'
+        ? '集合全局可用性只能在技能库模式修改。'
+        : 'Collection-wide availability can only be changed from the library.',
+      'warning'
+    );
+    return;
+  }
+  const input = event.target;
+  const filename = input.dataset.filename;
+  const enabled = input.checked;
   input.disabled = true;
   try {
     const result = await window.pywebview.api.set_collection_member_enabled(
@@ -2203,14 +2413,7 @@ collectionMembersList.addEventListener('change', async event => {
       enabled
     );
     if (result.error) throw new Error(result.error);
-    if (!enabled && !memberBefore?.collection?.is_controller) {
-      enabledSkills.delete(filename);
-    }
     await fetchSkills();
-    if (currentProjectPath) {
-      syncBtn.classList.add('active');
-      queuePendingSyncSummary();
-    }
     const collectionId = activeCollectionId;
     if (collectionId) openCollectionModal(collectionId);
     const member = getCollectionDisplaySkill(collectionId)?.collection_members?.find(
@@ -2219,19 +2422,20 @@ collectionMembersList.addEventListener('change', async event => {
     const displayFilename = member?.display_filename || filename;
     showToast(
       currentLanguage === 'zh'
-        ? `${displayFilename} 已${enabled ? '启用' : '停用'}`
-        : `${displayFilename} ${enabled ? 'enabled' : 'disabled'}`,
+        ? `${displayFilename} 已${enabled ? '设为全局可用' : '从全局可用范围停用'}`
+        : `${displayFilename} ${enabled ? 'made globally available' : 'removed from global availability'}`,
       'success'
     );
   } catch (error) {
     input.checked = !enabled;
     input.disabled = false;
     showToast(
-      (currentLanguage === 'zh' ? '更新子技能失败: ' : 'Failed to update child skill: ') + error,
+      (currentLanguage === 'zh' ? '更新集合可用性失败: ' : 'Failed to update collection availability: ') + error,
       'error'
     );
   }
 });
+// COLLECTION_AVAILABILITY_TOGGLE_END
 
 collectionMembersList.addEventListener('click', event => {
   const globalButton = event.target.closest('.js-collection-global-action');

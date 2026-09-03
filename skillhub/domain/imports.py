@@ -12,7 +12,8 @@ from skillhub.domain.metadata import infer_skill_metadata
 
 SKILL_IMPORT_MAX_FILE_BYTES = 10 * 1024 * 1024
 SKILL_IMPORT_MAX_TOTAL_BYTES = 50 * 1024 * 1024
-SKILL_IMPORT_MAX_ENTRIES = 500
+SKILL_IMPORT_MAX_ENTRIES = 2000
+SKILL_IMPORT_AI_COLLECTION_MAX_ITEMS = 8
 SKILL_IMPORT_DIFF_MAX_CHARS = 24000
 def build_import_diff(before: str, after: str, filename: str) -> str:
     """Return a complete bounded diff or reject it as unsafe to approve."""
@@ -104,6 +105,20 @@ def scan_skill_text(content: str, relative_path: str = "") -> list:
                 if re.search(
                     r"(?:不|禁止|不得|切勿|避免|never|do\s+not|don't|must\s+not)\s*$",
                     prefix,
+                ):
+                    continue
+                sentence_start = max(
+                    (content or "").rfind(separator, 0, match.start())
+                    for separator in ("\n", "。", ".", "!", "！", "?", "？")
+                )
+                context = (content or "")[sentence_start + 1:match.end()].lower()
+                if re.search(
+                    r"(?:不|禁止|不得|切勿|避免|never|do\s+not|don't|must\s+not)"
+                    r"[^。.!！?？\n]{0,24}"
+                    r"(?:读取|导出|记录|保存|捕获|回显|暴露|read|export|log|capture|store|save)"
+                    r"[^。.!！?？\n]{0,80}"
+                    r"(?:authorization|cookie|session id|session 文件|完整.{0,8}(?:header|body|入参))",
+                    context,
                 ):
                     continue
             matched = True

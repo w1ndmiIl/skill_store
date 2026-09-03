@@ -108,6 +108,89 @@ class ImportPreparationApiMixin:
                 with archive.open(info) as source_handle, open(target, "wb") as target_handle:
                     shutil.copyfileobj(source_handle, target_handle)
 
+    def _safe_extract_repository_skill_collection_zip(
+        self,
+        source: str,
+        destination: str,
+    ) -> dict:
+        """Extract only immediate ``skills/<name>`` packages from a repo ZIP."""
+        os.makedirs(destination, exist_ok=True)
+        with zipfile.ZipFile(source) as archive:
+            entries = []
+            skill_roots = {}
+            for info in archive.infolist():
+                path = PurePosixPath(info.filename)
+                if path.is_absolute() or ".." in path.parts:
+                    raise ValueError("Skill archive contains an unsafe path")
+                unix_mode = (info.external_attr >> 16) & 0o170000
+                if unix_mode == 0o120000:
+                    raise ValueError("Symbolic links are not allowed in skill archives")
+                entries.append((info, path))
+                if (
+                    not info.is_dir()
+                    and len(path.parts) >= 3
+                    and path.parts[-3] == "skills"
+                    and path.parts[-1] == "SKILL.md"
+                    and not path.parts[-2].startswith(".")
+                ):
+                    skill_name = path.parts[-2]
+                    skill_root = tuple(path.parts[:-1])
+                    previous = skill_roots.get(skill_name)
+                    if previous and previous != skill_root:
+                        raise ValueError(
+                            f"Skill archive contains duplicate collection member: {skill_name}"
+                        )
+                    skill_roots[skill_name] = skill_root
+
+            if not skill_roots:
+                raise ValueError(
+                    "Repository archive does not contain skills/<name>/SKILL.md"
+                )
+
+            file_count = 0
+            total_size = 0
+            for info, path in entries:
+                matched_name = ""
+                matched_root = ()
+                for skill_name, skill_root in skill_roots.items():
+                    if tuple(path.parts[:len(skill_root)]) == skill_root:
+                        matched_name = skill_name
+                        matched_root = skill_root
+                        break
+                if not matched_name or info.is_dir():
+                    continue
+                remainder = path.parts[len(matched_root):]
+                if any(
+                    part in (".git", "__pycache__", "__MACOSX")
+                    for part in remainder
+                ) or path.name.lower().endswith(".pyc"):
+                    continue
+                if info.file_size > SKILL_IMPORT_MAX_FILE_BYTES:
+                    raise ValueError("Skill archive contains an oversized file")
+                file_count += 1
+                total_size += info.file_size
+                if file_count > SKILL_IMPORT_MAX_ENTRIES:
+                    raise ValueError("Skill collection contains too many files")
+                if total_size > SKILL_IMPORT_MAX_TOTAL_BYTES:
+                    raise ValueError("Expanded skill collection is too large")
+                relative = os.path.join(
+                    "skills",
+                    matched_name,
+                    *remainder,
+                )
+                target = safe_real_child_path(destination, relative)
+                if not target:
+                    raise ValueError("Skill archive contains an unsafe path")
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with archive.open(info) as source_handle, open(target, "wb") as target_handle:
+                    shutil.copyfileobj(source_handle, target_handle)
+
+        return {
+            "skill_count": len(skill_roots),
+            "file_count": file_count,
+            "total_bytes": total_size,
+        }
+
     def _unique_import_name(
         self,
         requested: str,

@@ -319,6 +319,7 @@ Return one JSON object only with string fields "title" and "description"."""
             record = {
                 "id": collection_id,
                 "title": collection_id.replace("-", " ").title(),
+                "category": "",
                 "members": members,
                 "enabled_members": list(members),
                 "source_name": entry.get("source_name", ""),
@@ -388,6 +389,7 @@ Return one JSON object only with string fields "title" and "description"."""
                     record = {
                         "id": collection_id,
                         "title": title,
+                        "category": "",
                         "members": members,
                         "enabled_members": list(members),
                         "source_name": item,
@@ -452,6 +454,7 @@ Return one JSON object only with string fields "title" and "description"."""
             record = {
                 "id": collection_id,
                 "title": collection_id.replace("-", " ").title(),
+                "category": "",
                 "members": members,
                 "enabled_members": list(members),
                 "source_name": source_name,
@@ -459,6 +462,45 @@ Return one JSON object only with string fields "title" and "description"."""
             state["collections"].append(record)
         self._save_skill_collections(state)
         return record
+
+    def set_collection_category(
+        self,
+        collection_id: str,
+        category: str,
+    ) -> dict:
+        """Persist an independent library category for one collection card."""
+        collection_id = str(collection_id or "").strip()
+        category = str(category or "").strip()
+        if not collection_id:
+            return {"error": "Invalid collection"}
+        if len(category) > 80 or any(ord(char) < 32 for char in category):
+            return {"error": "Invalid collection category"}
+        if category in ("未分类", "Uncategorized"):
+            category = ""
+
+        state = self._load_skill_collections()
+        collection = next(
+            (
+                item for item in state.get("collections", [])
+                if item.get("id") == collection_id
+            ),
+            None,
+        )
+        if not collection:
+            return {"error": "Collection not found"}
+        previous = str(collection.get("category", "")).strip()
+        if category:
+            collection["category"] = category
+        else:
+            collection.pop("category", None)
+        if category != previous:
+            self._save_skill_collections(state)
+        return {
+            "ok": True,
+            "collection_id": collection_id,
+            "category": category,
+            "changed": category != previous,
+        }
 
     def set_collection_member_enabled(
         self,

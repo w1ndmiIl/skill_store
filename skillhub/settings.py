@@ -36,7 +36,7 @@ AGENT_REMOTE_COLLECTIONS_DIR = os.path.join(
     USER_DATA_DIR,
     "agent-remote-collections",
 )
-APP_VERSION = "3.5.1"
+APP_VERSION = "3.5.2"
 SKILLHUB_INSTALL_GUIDE_URL = "https://skillhub.cn/install/skillhub.md"
 SKILLHUB_SEARCH_URL = "https://api.skillhub.cn/api/v1/search"
 SKILLHUB_DOWNLOAD_URL = "https://api.skillhub.cn/api/v1/download"

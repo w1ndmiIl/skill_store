@@ -154,6 +154,7 @@ class AgentRuntimeApiMixin:
                 (
                     "Fetch a public GitHub repository archive and preview every "
                     "immediate skills/*/SKILL.md child as one SkillHub collection. "
+                    "Repository may be a root URL or a /tree/<ref> URL. "
                     "Use this for repository-level goals; do not collapse the "
                     "repository to its default or first Skill."
                 ),

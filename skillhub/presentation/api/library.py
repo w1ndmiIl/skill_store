@@ -136,6 +136,7 @@ class LibraryApiMixin:
                 skills_by_name[member]["collection"] = {
                     "id": collection["id"],
                     "title": collection.get("title", collection["id"]),
+                    "category": str(collection.get("category", "")).strip(),
                     "display_title": collection_locale.get("title", ""),
                     "display_description": collection_locale.get(
                         "description",
@@ -291,16 +292,27 @@ class LibraryApiMixin:
         if not requested or requested in ("未分类", "Uncategorized"):
             return {"error": "The default category cannot be deleted"}
         sources = self._skill_category_sources(requested)
+        collections = [
+            collection
+            for collection in self._load_skill_collections().get("collections", [])
+            if str(collection.get("category", "")).strip() == requested
+        ]
         return {
             "ok": True,
             "category": requested,
-            "affected_count": len(sources),
+            "affected_count": len(sources) + len(collections),
             "affected": [
                 {
                     "filename": source["filenames"][0],
                     "title": source["title"],
                 }
                 for source in sources
+            ] + [
+                {
+                    "filename": f"@collection:{collection['id']}",
+                    "title": collection.get("title", collection["id"]),
+                }
+                for collection in collections
             ],
         }
 
@@ -310,7 +322,13 @@ class LibraryApiMixin:
         if not requested or requested in ("未分类", "Uncategorized"):
             return {"error": "The default category cannot be deleted"}
         sources = self._skill_category_sources(requested)
-        if not sources:
+        collection_state = self._load_skill_collections()
+        affected_collections = [
+            collection
+            for collection in collection_state.get("collections", [])
+            if str(collection.get("category", "")).strip() == requested
+        ]
+        if not sources and not affected_collections:
             return {"error": "No editable global Skill uses this category"}
 
         written = []
@@ -321,11 +339,22 @@ class LibraryApiMixin:
                     raise ValueError(f"Category field not found: {source['path']}")
                 atomic_write_text(source["path"], updated)
                 written.append(source)
+            for collection in affected_collections:
+                collection.pop("category", None)
+            if affected_collections:
+                self._save_skill_collections(collection_state)
         except Exception as error:
             rollback_errors = []
             for source in reversed(written):
                 try:
                     atomic_write_text(source["path"], source["content"])
+                except Exception as rollback_error:
+                    rollback_errors.append(str(rollback_error))
+            if affected_collections:
+                for collection in affected_collections:
+                    collection["category"] = requested
+                try:
+                    self._save_skill_collections(collection_state)
                 except Exception as rollback_error:
                     rollback_errors.append(str(rollback_error))
             message = str(error)
@@ -342,8 +371,11 @@ class LibraryApiMixin:
         return {
             "ok": True,
             "category": requested,
-            "affected_count": len(sources),
-            "affected": [source["filenames"][0] for source in sources],
+            "affected_count": len(sources) + len(affected_collections),
+            "affected": [
+                *[source["filenames"][0] for source in sources],
+                *[f"@collection:{item['id']}" for item in affected_collections],
+            ],
             "warning": "; ".join(index_warnings),
         }
 
