@@ -2,6 +2,12 @@
 
 import os
 import re
+import hashlib
+import difflib
+import uuid
+from skillhub.settings import USER_DATA_DIR
+from skillhub.infrastructure.filesystem import atomic_write_json
+from skillhub.infrastructure.json_store import file_lock
 
 import yaml
 
@@ -80,7 +86,36 @@ class SkillEditorApiMixin:
             "#       description: Explain why this tool is required.\n"
         )
 
+    def export_editor_draft(self, filename, editor_data):
+        if not isinstance(editor_data, dict) or not all(isinstance(editor_data.get(k, ""), str) for k in ("skill_content", "openai_yaml_content")):
+            return {"error": "Invalid draft"}
+        path = os.path.join(USER_DATA_DIR, "editor-drafts", uuid.uuid4().hex + ".json")
+        try:
+            atomic_write_json(path, {"filename": str(filename), "skill_content": editor_data.get("skill_content", ""), "openai_yaml_content": editor_data.get("openai_yaml_content", "")})
+            return {"ok": True, "path": path}
+        except OSError as error:
+            return {"error": str(error)}
+
+    def _editor_version(self, files):
+        result = {}
+        for key in ("skill_path", "openai_yaml_path"):
+            path = files.get(key)
+            result[key] = None
+            if path and os.path.isfile(path):
+                with open(path, "rb") as handle:
+                    result[key] = hashlib.sha256(handle.read()).hexdigest()
+        return result
+
     def get_skill_editor_data(self, filename):
+        with file_lock(self.skills_dir):
+            files = self._skill_editor_files(filename)
+            before = self._editor_version(files)
+            result = self._get_skill_editor_data(filename)
+            if before != self._editor_version(files):
+                return {"error": "文件在加载期间变化，请重新打开 / File changed while loading"}
+            return result
+
+    def _get_skill_editor_data(self, filename):
         files = self._skill_editor_files(filename)
         skill_path = files.get("skill_path", "")
         if not skill_path or not os.path.isfile(skill_path):
@@ -103,6 +138,7 @@ class SkillEditorApiMixin:
                 else {"form": {}}
             )
             return {
+                "version": self._editor_version(files),
                 "skill_content": skill_content,
                 "openai_yaml_content": metadata_content,
                 "openai_form": form_result.get("form", {}),
@@ -267,6 +303,10 @@ class SkillEditorApiMixin:
         return ""
 
     def save_skill_editor_data(self, filename, editor_data):
+        with file_lock(self.skills_dir):
+            return self._save_skill_editor_data(filename, editor_data)
+
+    def _save_skill_editor_data(self, filename, editor_data):
         if not isinstance(editor_data, dict):
             return {"error": "Invalid editor data"}
         skill_content = editor_data.get("skill_content")
@@ -280,6 +320,13 @@ class SkillEditorApiMixin:
         files = self._skill_editor_files(filename)
         skill_path = files.get("skill_path", "")
         metadata_path = files.get("openai_yaml_path", "")
+        expected = editor_data.get("expected_version")
+        if expected is not None and expected != self._editor_version(files):
+            return {"error": "文件已被外部修改，草稿已保留。 / File changed externally.",
+                    "conflict": True, "current": self.get_skill_editor_data(filename),
+                    "diff": "".join(difflib.unified_diff(
+                        self.get_skill_editor_data(filename).get("skill_content", "").splitlines(True),
+                        skill_content.splitlines(True), fromfile="Disk", tofile="Draft"))[:100000]}
         if not skill_path or not os.path.isfile(skill_path):
             return {"error": "File not found"}
         if save_metadata and not files.get("openai_yaml_supported"):

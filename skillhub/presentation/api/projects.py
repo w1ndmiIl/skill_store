@@ -23,6 +23,23 @@ class ProjectsApiMixin:
 
     def get_projects(self):
         """Return projects list with per-skill sync status."""
+        return self._collect_projects(self.projects)
+
+    def get_project(self, project_path: str):
+        """Inspect one registered project without scanning unrelated projects."""
+        registered_path = self._registered_project_path(project_path)
+        if not registered_path:
+            return {"error": "Project is not registered"}
+        project = next(
+            proj for proj in self.projects
+            if os.path.normcase(os.path.abspath(proj["path"]))
+            == os.path.normcase(registered_path)
+        )
+        return self._collect_projects([project])[0]
+
+    def _collect_projects(self, projects):
+        if not projects:
+            return []
         result = []
         md5_cache = {}
         global_skills = self._collect_skills(include_global_state=False)
@@ -34,7 +51,7 @@ class ProjectsApiMixin:
             if collection.get("kind") == "bundle"
             and collection.get("bundle_parent")
         }
-        for proj in self.projects:
+        for proj in projects:
             path = proj["path"]
             state_paths = self._sync_state_paths(path)
             sync_manifest = self._load_sync_manifest(path)
@@ -72,6 +89,8 @@ class ProjectsApiMixin:
                 entry["error"] = "路径不存在" if self.language == "zh" else "Path does not exist"
                 result.append(entry)
                 continue
+
+            entry["project_rules"] = self._project_rules_metadata(path)
 
             bundled_files = {}
             bundled_refs = set()
@@ -219,6 +238,39 @@ class ProjectsApiMixin:
             result.append(entry)
         return result
 
+    def _project_rules_metadata(self, project_path):
+        target = safe_real_child_path(project_path, "AGENTS.md")
+        return {
+            "filename": "@project-rules:AGENTS.md",
+            "title": "AGENTS.md", "display_filename": "AGENTS.md",
+            "description": "当前项目的固定开发规约" if self.language == "zh" else "Fixed development rules for this project",
+            "category": "Project rules", "tags": [], "emoji": "📌",
+            "project_only": True, "project_rules": True, "is_dir": False,
+            "project_path": project_path,
+            "available": bool(target and os.path.isfile(target)),
+        }
+
+    def get_project_rules_content(self, project_path):
+        """Read only the registered project's root AGENTS.md, never library data."""
+        registered = self._registered_project_path(project_path)
+        if not registered or not os.path.isdir(registered):
+            return {"error": "Project is not registered or does not exist"}
+        target = safe_real_child_path(registered, "AGENTS.md")
+        if not target:
+            return {"error": "AGENTS.md points outside this project"}
+        if not os.path.exists(target):
+            return {"missing": True, "content": "# AGENTS.md\n\n" + (
+                "本项目尚未创建 `AGENTS.md`。可以在项目根目录维护固定开发规约。"
+                if self.language == "zh" else "This project has no `AGENTS.md` yet. Maintain its fixed development rules in the project root."
+            )}
+        if not os.path.isfile(target):
+            return {"error": "AGENTS.md is not a file"}
+        try:
+            with open(target, "r", encoding="utf-8-sig") as handle:
+                return {"content": handle.read(), "missing": False}
+        except (OSError, UnicodeError) as error:
+            return {"error": str(error)}
+
     def add_project_via_dialog(self):
         """Open native folder picker and add as project."""
         # Determine starting folder
@@ -243,15 +295,14 @@ class ProjectsApiMixin:
 
         if any(p["path"].lower() == path.lower() for p in self.projects):
             return {"error": "该项目已关联"}
-        self.projects.append({"name": name, "path": path})
-        self._save_config()
+        saved = self._commit_config({"projects": [*self.projects, {"name": name, "path": path}]})
+        if saved.get("error"):
+            return saved
         return {"name": name, "path": path}
 
     def delete_project(self, path):
         """Remove project association (does NOT delete any files)."""
-        self.projects = [p for p in self.projects if p["path"].lower() != path.lower()]
-        self._save_config()
-        return {"ok": True}
+        return self._commit_config({"projects": [p for p in self.projects if p["path"].lower() != path.lower()]})
 
     def _registered_project_path(self, project_path: str) -> str:
         requested = os.path.normcase(os.path.abspath(project_path or ""))

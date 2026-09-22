@@ -1,6 +1,7 @@
 """AI-assisted Skill search, parsing, and save endpoints."""
 
 import os
+from skillhub.domain.naming import is_project_rules_document
 import re
 
 import requests
@@ -185,6 +186,8 @@ description: <一句话描述这个技能的用途>
     def ai_save_skill(self, skill_data):
         """Save an AI-generated skill to the global library."""
         filename = normalize_skill_filename(skill_data.get("filename", ""), ensure_md=True)
+        if is_project_rules_document(filename):
+            return {"error": "AGENTS.md 不允许自动 AI 修改；请在项目规约编辑器手动编辑或单独授权 AI 起草。"}
         content = skill_data.get("content", "")
         if not filename or not content:
             return {"error": "Missing filename or content"}

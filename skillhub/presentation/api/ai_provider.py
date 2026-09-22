@@ -28,13 +28,19 @@ class AiProviderApiMixin:
                 json={
                     "model": self.deepseek_model,
                     "messages": [{"role": "user", "content": "Hi"}],
-                    "max_tokens": 10
+                    "max_tokens": 80,
+                    "tools": [{"type": "function", "function": {"name": "connection_probe", "description": "Check tool support", "parameters": {"type": "object", "properties": {}}}}],
+                    "tool_choice": {"type": "function", "function": {"name": "connection_probe"}}
                 },
                 timeout=15
             )
             elapsed = int((time.time() - start) * 1000)
             if resp.status_code == 200:
-                return {"ok": True, "model": self.deepseek_model, "latency_ms": elapsed}
+                calls = resp.json().get("choices", [{}])[0].get("message", {}).get("tool_calls", [])
+                supported = any(c.get("function", {}).get("name") == "connection_probe" for c in calls)
+                return {"ok": supported, "connected": True, "tool_calling": supported,
+                        "error": "" if supported else "接口已连接，但未返回工具调用 / Connected, but tool calling was not verified",
+                        "model": self.deepseek_model, "latency_ms": elapsed}
             else:
                 try:
                     err = resp.json().get("error", {}).get("message", f"HTTP {resp.status_code}")

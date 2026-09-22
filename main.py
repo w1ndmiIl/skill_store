@@ -155,7 +155,19 @@ from skillhub.presentation.api.projects import ProjectsApiMixin
 # pywebview JavaScript API Bridge
 # ============================================================
 
+from skillhub.presentation.api.background_agent import BackgroundAgentApiMixin
+from skillhub.presentation.api.trash import TrashApiMixin
+from skillhub.presentation.api.project_rules_editor import ProjectRulesEditorApiMixin
+from skillhub.presentation.api.workspace_state import WorkspaceStateApiMixin
+from skillhub.presentation.api.storage_recovery import StorageRecoveryApiMixin
+
+
 class Api(
+    BackgroundAgentApiMixin,
+    TrashApiMixin,
+    ProjectRulesEditorApiMixin,
+    WorkspaceStateApiMixin,
+    StorageRecoveryApiMixin,
     ConfigurationApiMixin,
     AiProviderApiMixin,
     AgentCatalogApiMixin,
@@ -241,4 +253,5 @@ if __name__ == "__main__":
         text_select=True,
     )
     api.set_window(window)
+    window.events.closing += api.can_close_window
     webview.start(debug=False, func=lambda: set_window_icon(icon_path))

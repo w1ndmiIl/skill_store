@@ -3,6 +3,17 @@
 import os
 
 from .filesystem import atomic_write_json, load_json_file
+from .json_store import read_json, write_json
+
+def valid_config(value):
+    if not isinstance(value, dict):
+        return False
+    strings = ("skills_dir", "language", "theme", "default_scan_dir", "deepseek_api_key", "deepseek_model", "api_base")
+    return (all(isinstance(value.get(k, ""), str) for k in strings)
+            and isinstance(value.get("projects", []), list)
+            and all(isinstance(p, dict) and isinstance(p.get("path"), str)
+                    and isinstance(p.get("name"), str) for p in value.get("projects", []))
+            and isinstance(value.get("global_skill_targets", []), list))
 
 
 def get_default_skills_dir() -> str:
@@ -76,7 +87,7 @@ class ConfigRepository:
                 except OSError:
                     pass
 
-        loaded = load_json_file(self.config_path, defaults)
+        loaded = read_json(self.config_path, defaults, valid_config)
         if not isinstance(loaded, dict):
             return defaults
         config = dict(loaded)
@@ -94,7 +105,7 @@ class ConfigRepository:
 
     def save(self, config: dict) -> bool:
         try:
-            atomic_write_json(self.config_path, config)
+            write_json(self.config_path, config, valid_config)
             return True
-        except OSError:
+        except (OSError, ValueError):
             return False

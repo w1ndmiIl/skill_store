@@ -3,9 +3,11 @@
 import atexit
 import ctypes
 import os
+import hashlib
+from skillhub.settings import USER_DATA_DIR
 
 
-SINGLE_INSTANCE_MUTEX_NAME = r"Local\SkillHub.Desktop.SingleInstance"
+SINGLE_INSTANCE_MUTEX_NAME = r"Local\SkillHub.Desktop.SingleInstance." + hashlib.sha256(os.path.normcase(os.path.realpath(USER_DATA_DIR)).encode()).hexdigest()[:16]
 ERROR_ALREADY_EXISTS = 183
 _single_instance_guard = None
 class SingleInstanceGuard:

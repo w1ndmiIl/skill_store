@@ -99,6 +99,13 @@ class LibraryApiMixin:
 
         display_localizations = self._load_display_localizations()
         for skill in skills:
+            source = os.path.join(self.skills_dir, skill.get("virtual_parent", ""), skill.get("virtual_source", "")) if skill.get("is_virtual") else os.path.join(self.skills_dir, skill["filename"])
+            if os.path.isdir(source):
+                source = os.path.join(source, "SKILL.md" if skill.get("folder_kind") == "standard" else "README.md")
+            try:
+                skill["modified_at"] = os.stat(source).st_mtime
+            except OSError:
+                skill["modified_at"] = 0
             self._apply_display_localization(skill, display_localizations)
 
         skills_by_name = {
@@ -190,16 +197,7 @@ class LibraryApiMixin:
         if not registered_project:
             return {"error": "Project is not registered"}
 
-        project_entry = next(
-            (
-                item
-                for item in self.get_projects()
-                if os.path.normcase(
-                    os.path.realpath(os.path.abspath(item.get("path", "")))
-                ) == requested_project
-            ),
-            {},
-        )
+        project_entry = self.get_project(registered_project)
         allowed_paths = {
             item.get("project_relative_path", "")
             for item in project_entry.get("project_skills", [])
@@ -432,8 +430,8 @@ class LibraryApiMixin:
                 collection_snapshot = self._load_skill_collections()
                 trash_token = uuid.uuid4().hex
                 trash_root = safe_real_child_path(
-                    os.path.join(self.skills_dir, SKILL_LIBRARY_STATE_DIR, "trash"),
-                    trash_token,
+                    self.skills_dir,
+                    os.path.join(SKILL_LIBRARY_STATE_DIR, "trash", trash_token),
                 )
                 if not trash_root:
                     return {"error": "Invalid trash path"}
@@ -504,8 +502,8 @@ class LibraryApiMixin:
         if not re.fullmatch(r"[0-9a-f]{32}", trash_token or ""):
             return {"error": "Invalid trash token"}
         trash_root = safe_real_child_path(
-            os.path.join(self.skills_dir, SKILL_LIBRARY_STATE_DIR, "trash"),
-            trash_token,
+            self.skills_dir,
+            os.path.join(SKILL_LIBRARY_STATE_DIR, "trash", trash_token),
         )
         if not trash_root or not os.path.isdir(trash_root):
             return {"error": "Deleted skill is no longer available"}
@@ -521,7 +519,19 @@ class LibraryApiMixin:
             shutil.move(source, target)
             collections = metadata.get("collections")
             if isinstance(collections, dict):
-                self._save_skill_collections(collections)
+                current = self._load_skill_collections()
+                current_collections = current.setdefault("collections", [])
+                for old in collections.get("collections", []):
+                    if old.get("bundle_parent") != filename and filename not in old.get("members", []):
+                        continue
+                    existing = next((c for c in current_collections if c.get("id") == old.get("id")), None)
+                    if existing is None:
+                        current_collections.append(old)
+                    else:
+                        restored_members = old.get("members", []) if old.get("bundle_parent") == filename else [filename]
+                        existing["members"] = list(dict.fromkeys([*existing.get("members", []), *restored_members]))
+                        existing["enabled_members"] = list(dict.fromkeys([*existing.get("enabled_members", []), *[m for m in old.get("enabled_members", []) if m in restored_members]]))
+                self._save_skill_collections(current)
             self._register_library_entry(filename, source="restored")
             warning = ""
             enabled_targets = metadata.get("global_targets_were_enabled", [])

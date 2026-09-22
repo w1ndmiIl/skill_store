@@ -41,7 +41,7 @@ class AgentCatalogApiMixin:
         query = arguments["query"].strip().casefold()
         limit = arguments.get("limit", 10)
         results = []
-        for skill in self.get_skills():
+        for skill in self._collect_skills(include_global_state=False):
             searchable = " ".join([
                 str(skill.get("filename", "")),
                 str(skill.get("title", "")),
