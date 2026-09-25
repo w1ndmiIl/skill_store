@@ -2,7 +2,7 @@
 
 [English](README_EN.md) · [使用说明书](docs/SkillHub使用说明书.md) · [架构与技术实现手册](docs/ARCHITECTURE.md) · [下载最新版](https://github.com/w1ndwill/skill_store/releases/latest) · [MIT License](LICENSE)
 
-SkillHub 是一个本地运行的 AI Skill 管理与同步工具。它用于集中保存可复用的开发规则、工作流和专业能力，并将它们按需应用到不同项目或 Codex、Claude Code、Cursor、Cline、OpenCode、Windsurf、Gemini CLI、VS Code/Copilot 等客户端。当前版本：**3.5.2**。
+SkillHub 是一个本地运行的 AI Skill 管理与同步工具。它用于集中保存可复用的开发规则、工作流和专业能力，并将它们按需应用到不同项目或 Codex、Claude Code、Cursor、Cline、OpenCode、Windsurf、Gemini CLI、VS Code/Copilot 等客户端。当前版本：**3.6.0**。
 
 所有写入都围绕“先检查、再预览、后确认”设计：导入会经过本地体检，项目同步会显示文件级新增、更新、移除和冲突，Agent 写操作绑定一次性审批与当前哈希。配置、会话、记忆、回收站和备份均保存在本机。
 
