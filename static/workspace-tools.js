@@ -139,10 +139,20 @@ function drawQueue(){
     const status=document.createElement('small');status.textContent=item.error||({pending:uiText('待检查','Pending'),checking:uiText('检查中','Inspecting'),ready:uiText('待审阅','Review'),done:uiText('已完成','Completed'),skipped:uiText('已跳过','Skipped'),failed:uiText('失败，可重试','Failed; retry')}[item.status]||item.status);
     row.append(check,title,status);
     if(item.preview){toolButton(uiText('查看 / 审阅','Details / review'),()=>reviewQueueItem(item),row);}
-    toolButton(uiText('跳过','Skip'),async()=>{if(toolBusy)return;item.status='skipped';item.selected=false;if(item.preview?.token)await window.pywebview.api.discard_skill_import(item.preview.token);drawQueue();},row);
+    if(!['done','skipped'].includes(item.status))toolButton(uiText('跳过','Skip'),()=>skipQueueItem(item),row);
     toolBody.append(row);
   }
-  toolFooter.textContent=uiText('已完成 ','Completed ')+inspectionQueue.filter(i=>i.status==='done').length+' / '+inspectionQueue.length;
+  toolFooter.textContent=uiText('已完成 ','Completed ')+inspectionQueue.filter(i=>['done','skipped'].includes(i.status)).length+' / '+inspectionQueue.length;
+}
+async function acknowledgeQueueItem(item,status){
+  const r=await window.pywebview.api.acknowledge_unregistered_skill(item.filename,item.hash);
+  if(r?.error)throw new Error(r.error);
+  if(item.preview?.token){try{await window.pywebview.api.discard_skill_import(item.preview.token);}catch(_){/* Staged previews expire automatically. */}}
+  item.status=status;item.selected=false;item.preview=null;item.error='';
+}
+async function skipQueueItem(item){if(toolBusy||['done','skipped'].includes(item.status))return;
+  toolBusy=true;try{await acknowledgeQueueItem(item,'skipped');}catch(e){item.status='failed';item.error=e.message;}
+  finally{toolBusy=false;drawQueue();await fetchSkills();}
 }
 async function inspectAll(){if(toolBusy)return;toolBusy=true;
   try{for(const item of inspectionQueue.filter(i=>['pending','failed'].includes(i.status))){
@@ -158,7 +168,7 @@ async function applySelected(){if(toolBusy)return;
   if(!await showCustomDialog({title:uiText('应用所选低风险项？','Apply selected low-risk items?'),message:selected.map(i=>i.filename).join('\n')}))return;
   toolBusy=true;try{for(const item of selected){try{await applyQueueItem(item);}catch(e){item.status='failed';item.error=e.message;}drawQueue();}}finally{toolBusy=false;drawQueue();await fetchSkills();}}
 async function keepSelected(){if(toolBusy)return;toolBusy=true;try{for(const item of inspectionQueue.filter(i=>i.selected)){
-    try{const r=await window.pywebview.api.acknowledge_unregistered_skill(item.filename);if(r?.error)throw new Error(r.error);if(item.preview?.token)await window.pywebview.api.discard_skill_import(item.preview.token);item.status='done';item.selected=false;}catch(e){item.status='failed';item.error=e.message;}
+    try{await acknowledgeQueueItem(item,'done');}catch(e){item.status='failed';item.error=e.message;}
   }}finally{toolBusy=false;drawQueue();await fetchSkills();}}
 async function reviewQueueItem(item){if(toolBusy||!item.preview)return;const preview=item.preview;
   const confirmed=await showCustomDialog({title:item.filename,message:formatImportPreview(preview),confirmText:uiText('应用','Apply')});if(!confirmed)return;

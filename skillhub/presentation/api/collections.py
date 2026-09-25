@@ -575,7 +575,7 @@ Return one JSON object only with string fields "title" and "description"."""
                 continue
         return entries
 
-    def _register_library_entry(self, name: str, source="managed") -> None:
+    def _register_library_entry(self, name: str, source="managed", content_hash=None) -> None:
         path = safe_real_child_path(self.skills_dir, name)
         if not path or not os.path.exists(path):
             return
@@ -588,7 +588,7 @@ Return one JSON object only with string fields "title" and "description"."""
                 "entries": self._current_library_entries(),
             }
         index["entries"][name] = {
-            "hash": get_tree_sha256(path),
+            "hash": content_hash if content_hash is not None else get_tree_sha256(path),
             "kind": "folder" if os.path.isdir(path) else "markdown",
             "source": source,
             "registered_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -639,12 +639,20 @@ Return one JSON object only with string fields "title" and "description"."""
             })
         return {"ok": True, "initialized": False, "skills": unknown}
 
-    def acknowledge_unregistered_skill(self, filename: str) -> dict:
-        """Trust a directly copied skill without rewriting it."""
+    def acknowledge_unregistered_skill(self, filename: str, expected_hash=None) -> dict:
+        """Accept the inspected file version without rewriting the skill."""
         if filename.startswith("."):
             return {"error": "Invalid skill filename"}
         path = safe_real_child_path(self.skills_dir, filename)
         if not path or not os.path.exists(path):
             return {"error": "Skill does not exist"}
-        self._register_library_entry(filename, source="direct-trusted")
+        try:
+            current_hash = get_tree_sha256(path)
+        except OSError:
+            return {"error": "Skill could not be read"}
+        if expected_hash is not None and current_hash != expected_hash:
+            return {"error": "Skill changed since the inspection queue was opened"}
+        self._register_library_entry(
+            filename, source="direct-trusted", content_hash=current_hash
+        )
         return {"ok": True, "filename": filename}
