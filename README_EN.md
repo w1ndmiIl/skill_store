@@ -1,14 +1,29 @@
 # SkillHub
 
-[中文](README.md) · [User manual](docs/SkillHub使用说明书.md) · [Download the latest release](https://github.com/w1ndwill/skill_store/releases/latest) · [MIT License](LICENSE)
+[中文](README.md) · [User manual](docs/SkillHub使用说明书.md) · [Architecture & Technical Manual](docs/ARCHITECTURE.md) · [Download the latest release](https://github.com/w1ndwill/skill_store/releases/latest) · [MIT License](LICENSE)
 
-SkillHub is a local AI Skill management and synchronization tool. It keeps reusable development rules, workflows, and specialist capabilities in one place, then applies them selectively to projects or clients such as Codex, Claude Code, Cursor, Cline, OpenCode, Windsurf, Gemini CLI, and VS Code/Copilot. Current version: **3.5.2**.
+SkillHub is a local AI Skill management and synchronization tool. It keeps reusable development rules, workflows, and specialist capabilities in one place, then applies them selectively to projects or clients such as Codex, Claude Code, Cursor, Cline, OpenCode, Windsurf, Gemini CLI, and VS Code/Copilot. Current version: **3.6.0**.
 
-Users can review changes, conflicts, and scope overlaps before a write and safely roll back afterward. Import inspection and display localization do not rewrite the original semantics of third-party Skills. SkillOps Agent is optional assistance for finding, inspecting, and maintaining Skills; it does not replace manual management or approval.
+Every mutation follows a review-first workflow: imports receive local inspection, project synchronization shows file-level additions, updates, removals, and conflicts, and Agent writes are bound to one-time approvals and current hashes. Settings, sessions, memory, trash, and backups stay on the local machine.
 
 ![SkillHub English Skill library](docs/screenshots/en/skill-library.png)
 
-*Recaptured from the current v3.5.0 interface. Skill names, project paths, and enablement states are sanitized demonstration data.*
+*Screenshots use synthetic Skills, a demonstration project, and sanitized paths. They contain no real credentials, sessions, or project content.*
+
+## Feature overview
+
+| Capability | Current behavior |
+| --- | --- |
+| Skill asset management | Import Markdown, ZIP files, standard `SKILL.md` folders, and repository collections; search, categorize, sort, edit, inspect, and restore from trash |
+| Skill collections | Preserve repository boundaries and manage collection category, controller, child availability, and global targets per member |
+| Usage metadata | Edit both `SKILL.md` and optional `agents/openai.yaml` through an explained form or raw YAML |
+| Multi-client distribution | Select Codex, Claude Code, Cursor, Cline, OpenCode, Windsurf, Antigravity, Gemini CLI, VS Code/Copilot, or Claude Desktop independently for each Skill |
+| Project synchronization | Choose Skills per project; preview file changes, conflicts, and global/project scope overlap before writing; safely undo eligible changes |
+| Fixed project rules | Pin the project's root `AGENTS.md` at the top of project view, with manual editing, preview, saving, and recoverable drafts |
+| Controlled AI drafting | Automatic AI optimization and general Agent tools cannot modify `AGENTS.md`; AI returns a draft only after one explicit authorization, and the user must still save it |
+| SkillOps Agent | Search, inspect, preview imports, and plan project synchronization through bounded tools; show steps, timing, memory, approvals, and stop controls |
+| Reliable persistence | Use atomic writes, shared transaction locks, validated backups, and explicit recovery for sessions, settings, tasks, and memory |
+| Local safety boundary | Treat external Skills, pages, repositories, tool results, and recalled memory as untrusted data; never execute imported scripts, hooks, or MCP services |
 
 ## Problems SkillHub solves
 
@@ -29,17 +44,25 @@ Import → local inspection → categorization or collection organization → pr
 
 SkillHub imports Markdown, ZIP files, standard `SKILL.md` folders, and repository collections. It provides one workspace for browsing, search, categories, editing, display localization, trash recovery, and deterministic inspection while keeping display metadata separate from source semantics.
 
+New Skills should use `<name>/SKILL.md`. Legacy single-file Skills remain usable; import inspection and library audits flag their layout.
+
 #### Multi-Skill collections
 
 ![English Skill collection manager](docs/screenshots/en/collection-manager.png)
 
 Repository imports are scanned for collection boundaries. A collection can be disabled as a unit while each child Skill remains reviewable and independently selectable.
 
+#### Persistent trash
+
+![Persistent Skill trash](docs/screenshots/en/trash.png)
+
+Deleted Skills move into persistent trash. They can be restored individually or in batches after an application restart, or permanently removed through an explicit confirmation. Existing same-name files are never overwritten.
+
 #### Skill document details
 
 ![English Skill document details](docs/screenshots/en/skill-detail.png)
 
-The detail drawer presents source information, category, tags, Frontmatter, and rendered Markdown. Editing explicitly opens the source; project-only Skills remain read-only.
+The detail drawer presents source information, category, tags, Frontmatter, and rendered Markdown. Wide tables expand the reading surface and scroll inside the table on smaller windows instead of collapsing columns into one-word lines.
 
 #### Skill usage configuration
 
@@ -52,6 +75,14 @@ Standard Skill folders expose both `SKILL.md` and `agents/openai.yaml`. The Open
 ![English project Skill configuration](docs/screenshots/en/project-configuration.png)
 
 Each project selects its own Skills. The view combines source descriptions, categories, sync status, and enablement controls. A bottom action bar summarizes pending changes and opens a preview before writing. Every executable library Skill can independently target Codex, Claude Code, Cursor, Cline, OpenCode, Windsurf, Antigravity, Gemini CLI, VS Code, or Claude Desktop without binding it to a project.
+
+The root `AGENTS.md` is pinned first and labeled as the project's fixed development rules. It never enters the global Skill library, collections, enablement state, or synchronization selection. If it is missing, viewing the placeholder does not create a file.
+
+![Project rules table](docs/screenshots/en/project-rules.png)
+
+The project-rules editor supports manual editing, Markdown preview, `Ctrl+S`, draft recovery, and external-change detection. Automatic AI optimization, AI-generated Skill saving, and general SkillOps Agent write tools cannot modify `AGENTS.md`. “Authorize AI draft” grants one request bound to the current project and file version. AI never writes the file; the user must review the draft and click Save.
+
+![Project rules editor](docs/screenshots/en/project-rules-editor.png)
 
 ![Per-Skill global target selection in English](docs/screenshots/en/global-target-selection.png)
 
@@ -80,7 +111,11 @@ Generated project content lives at:
 | Bilingual descriptions | Use display-only localization without rewriting third-party `SKILL.md` |
 | Project synchronization | Preview additions, updates, removals, file conflicts, and global/project scope overlaps before writing |
 | Sync rollback | Undo the most recent sync when affected project files have not changed again |
-| SkillOps Agent | Optional tool-assisted module for finding, inspecting, previewing, and maintaining Skills |
+| Fixed project rules | Pin project `AGENTS.md`; provide manual editing, preview, drafts, and conflict protection without adding it to the Skill library or sync selection |
+| Project-rules AI draft | Disable automatic AI writes; one explicit authorization produces a reviewable draft that still requires manual Save |
+| SkillOps Agent | Optional bounded module for finding, inspecting, previewing, and maintaining Skills with background progress, timing, memory, and approvals |
+| Persistent trash | Restore deleted Skills across restarts, with batch recovery, conflict reporting, and explicit permanent deletion |
+| Data recovery | Protect settings, sessions, tasks, and memory with atomic writes, validated backups, and explicit recovery |
 | Single-instance startup | A second launch focuses the existing window instead of opening another |
 | Local data model | Skills, settings, sessions, Agent memory, and backups stay on the machine |
 
@@ -96,6 +131,8 @@ The model can only call predefined bounded tools. The runtime rejects clearly un
 
 Installation, saving, and synchronization require a preview. Approval is bound to the exact tool, target arguments, content or tree hashes, and a one-time approval ID; a changed target invalidates the old approval. Long-term memory accepts only allowlisted fields and explicit memory intent, and rejects content that attempts to broaden permissions, skip approval, or rewrite security rules.
 
+Tasks can continue in the background while the UI displays the current phase, tool timeline, and recalled memory. Stop is cooperative: no later operation starts, completed effects remain, and project synchronization should be reverted through its dedicated undo action.
+
 ## Quick start
 
 1. Download `SkillHub.exe` from [GitHub Releases](https://github.com/w1ndwill/skill_store/releases/latest).
@@ -103,13 +140,13 @@ Installation, saving, and synchronization require a preview. Approval is bound t
 3. Import a `.md`, `.zip`, standard Skill folder, or Skill collection.
 4. Optionally adjust target defaults in Settings, then choose clients separately from each Skill's global action.
 5. For per-project configuration, add a target project and select the Skills it needs.
-6. Review the sync preview, then confirm the write.
+6. View or manually maintain the root `AGENTS.md` first, then review the sync preview and confirm the write.
 7. Optional: open SkillOps Agent for assisted inspection, installation, or maintenance.
 
-The application is portable and requires no installer. On first launch it creates:
+The application is portable and requires no installer. Its default writable data location is:
 
 ```text
-%LOCALAPPDATA%\SkillHub\skills
+%LOCALAPPDATA%\SkillHub
 ```
 
 ## Run from source
@@ -126,16 +163,33 @@ python main.py
 Build the portable executable:
 
 ```powershell
-python -m pip install pyinstaller
-pyinstaller --clean --noconfirm SkillHub.spec
+.\.venv\Scripts\python.exe -B -X utf8 scripts/build.py
 ```
+
+## Development checks
+
+After installing the project dependencies, ensure Node.js 22+ and Git are on PATH, then run with the project environment:
+
+```powershell
+.\.venv\Scripts\python.exe -B -X utf8 scripts/check.py
+```
+
+This runs JavaScript syntax checks, Python regressions, frontend interaction tests, Agent security evaluations, and diff checks. It stops with a nonzero exit code on failure and uses a temporary application data directory instead of personal sessions or configuration. GitHub Actions runs the same entry point on Windows for pushes and pull requests.
+
+Keep shared regression tests in the tracked `tests/` directory. Keep private data, experiments, and legacy tests in the ignored `.local/` directory. Packaging and a real application walkthrough are still required before release.
 
 ## Repository layout
 
+Source is organized by layered responsibility:
+
 ```text
+├── skillhub/                # Application, domain, infrastructure, and API implementation
 ├── agent_runtime.py         # Agent loop, tool protocol, approvals, memory, and run records
 ├── main.py                  # Backend, file operations, sync, and Agent tool adapters
 ├── static/                  # PyWebView frontend, interactions, and bundled resources
+├── tests/                   # Shared regression tests
+├── security_evals/          # Agent security evaluations
+├── scripts/                 # Development check entry points
 ├── docs/
 │   ├── SkillHub使用说明书.md
 │   └── screenshots/
@@ -181,3 +235,7 @@ The current 12 deterministic cases establish a baseline of 100% normal-task comp
 ## License
 
 [MIT](LICENSE)
+
+## Local reliability and workflow update
+
+The current implementation includes background Agent progress and stop controls, persistent trash, recoverable drafts, external-change protection, manual project-rules editing with authorized AI drafts, sorting, and pagination. Sessions, settings, tasks, and memory use transactional writes and corruption protection. The build entry point generates the executable, checksum, and `BUILD_INFO.json` source fingerprint.

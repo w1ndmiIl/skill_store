@@ -1,6 +1,7 @@
 """Candidate compatibility, AI optimization, and immutable import preparation."""
 
 import os
+from skillhub.domain.naming import is_project_rules_document
 import re
 
 import requests
@@ -94,6 +95,7 @@ class ImportCandidatesApiMixin:
             content,
             entry_name,
             package_bytes,
+            layout=kind,
         )
 
     def _ai_optimize_import_entry(
@@ -103,6 +105,8 @@ class ImportCandidatesApiMixin:
         active_name: str,
     ) -> dict:
         """Optionally improve the staged entry document; local import remains authoritative."""
+        if is_project_rules_document(active_name) or is_project_rules_document(adapted_path):
+            return {"error": "AGENTS.md 不允许自动 AI 修改；请在项目规约编辑器手动编辑或单独授权 AI 起草。", "protected": True}
         if not self.deepseek_api_key:
             return {"error": "AI optimization is enabled, but no API Key is configured"}
         if kind == "standard":

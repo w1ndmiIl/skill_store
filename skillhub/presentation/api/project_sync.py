@@ -30,6 +30,9 @@ from skillhub.infrastructure.sync_status import (
 )
 
 
+from skillhub.infrastructure.json_store import file_lock
+
+
 class ProjectSyncApiMixin:
     """Plan and apply project synchronization with rollback and undo."""
 
@@ -41,9 +44,12 @@ class ProjectSyncApiMixin:
 
 
 
-    def _collect_desired_sync_files(self, project_path: str, enabled_skills: list):
+    def _collect_desired_sync_files(
+        self, project_path: str, enabled_skills: list, *, global_skills=None
+    ):
         enabled_set = set(enabled_skills or [])
-        global_skills = self.get_skills()
+        if global_skills is None:
+            global_skills = self._collect_skills(include_global_state=False)
         enabled = [skill for skill in global_skills if skill.get("filename") in enabled_set]
         bundle_collections = {
             collection.get("bundle_parent"): collection
@@ -260,8 +266,11 @@ class ProjectSyncApiMixin:
             preserved_files = {}
         effective_enabled = self._effective_enabled_skills(enabled_skills)
         scope_conflicts = self._project_global_scope_conflicts(effective_enabled)
+        # Share metadata only within this plan. Apply builds a fresh plan and
+        # retains its source/target hash checks against the reviewed preview.
+        global_skills = self._collect_skills(include_global_state=False)
         desired, active_metadata, source_collision_keys = self._collect_desired_sync_files(
-            registered_path, effective_enabled
+            registered_path, effective_enabled, global_skills=global_skills
         )
         changes = []
         desired_keys = {
@@ -338,7 +347,7 @@ class ProjectSyncApiMixin:
         enabled_set = set(effective_enabled)
         disabled_filenames = [
             skill.get("filename", "")
-            for skill in self.get_skills()
+            for skill in global_skills
             if skill.get("filename")
             and skill.get("filename") not in enabled_set
             and not skill.get("project_only")
@@ -347,6 +356,7 @@ class ProjectSyncApiMixin:
             self._collect_desired_sync_files(
                 registered_path,
                 disabled_filenames,
+                global_skills=global_skills,
             )
         )
         for relative_path, spec in legacy_desired.items():
@@ -533,7 +543,11 @@ class ProjectSyncApiMixin:
         else:
             atomic_write_text(target, spec.get("content") or "")
 
-    def sync_skills(
+    def sync_skills(self, project_path, enabled_skills, allow_conflicts=False, preview_token="", allow_bundle_files=False):
+        with file_lock(project_path):
+            return self._sync_skills(project_path, enabled_skills, allow_conflicts, preview_token, allow_bundle_files)
+
+    def _sync_skills(
         self,
         project_path,
         enabled_skills,
@@ -668,14 +682,25 @@ class ProjectSyncApiMixin:
                 os.remove(state_paths["manifest"])
             return {"error": str(exc)}
 
+        history_warning = ""
+        if hasattr(self, "_remember_sync_result"):
+            try:
+                self._remember_sync_result(project_path, preview, transaction, backup_root)
+            except OSError:
+                history_warning = "同步成功，但结果记录未保存 / Sync succeeded, but result history could not be saved"
         return {
             "ok": True,
+            "history_warning": history_warning,
             "synced_count": len(plan["active_metadata"]),
             "summary": preview["summary"],
             "transaction_id": transaction_id,
         }
 
     def undo_last_sync(self, project_path):
+        with file_lock(project_path):
+            return self._undo_last_sync(project_path)
+
+    def _undo_last_sync(self, project_path):
         """Undo the most recent sync unless a resulting file was edited afterward."""
         registered_path = self._registered_project_path(project_path)
         if not registered_path or not os.path.isdir(registered_path):

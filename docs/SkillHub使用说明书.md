@@ -189,32 +189,34 @@ SkillHub 只接受已经登记的项目路径。项目目录被移动或删除�
 
 ## 5. 支持的 Skill 类型
 
-### 5.1 单文件 Markdown Skill
+### 5.1 旧式单文件 Markdown Skill
 
-文件直接放在全局库根目录，例如：
+SkillHub 仍可读取放在全局库根目录的单文件，以兼容已有资料。例如：
 
 ```text
 skills\
-└── Git提交规范.md
+└── legacy-skill.md
 ```
 
 推荐 Frontmatter：
 
 ```yaml
 ---
-title: Git 提交规范
+title: 示例技能
 emoji: 🌿
 category: 工作流
 tags: Git, Conventional Commits, 协作
-description: 用于创建或审查 Git 提交。
+description: 用于演示旧式单文件结构。
 ---
 ```
 
 同步目标为：
 
 ```text
-<项目>\.agent\skills\Git提交规范.md
+<项目>\.agent\skills\legacy-skill.md
 ```
+
+新建 Skill 推荐使用下一节的标准文件夹。导入体检与技能库审计会提示旧式单文件结构，但不会阻止导入或使用；项目同步和客户端适配仍保持兼容。
 
 ### 5.2 标准 Skill 文件夹
 
@@ -314,6 +316,8 @@ collection\
 - 记录敏感请求或会话数据；
 - 破坏性命令；
 - 依赖特定 Agent 的工具名称；
+- 旧式单文件结构（建议改为 `<名称>/SKILL.md`，不阻止使用）；
+- 标准文件夹名与 `SKILL.md` 的 `name` 不一致（改名之前应检查包内路径引用）；
 - Bundle 路径冲突；
 - ZIP 路径穿越或符号链接。
 
@@ -347,7 +351,7 @@ collection\
 
 ### 7.1 新建与编辑
 
-全局库模式下可以新建单文件 Skill，也可以打开已有 Skill 编辑入口文档。
+全局库模式下新建 Skill 默认生成 `<名称>/SKILL.md` 标准文件夹，也可以打开已有 Skill 编辑入口文档。旧式单文件仍可编辑和使用。
 
 对于标准 Skill 文件夹，编辑窗口提供两个来源：
 

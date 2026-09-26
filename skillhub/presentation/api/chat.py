@@ -27,6 +27,12 @@ class ChatApiMixin:
     def _save_sessions(self, sessions):
         return self._session_repository().save(sessions)
 
+    def chat_recover_sessions(self):
+        try:
+            return self._session_repository().recover()
+        except OSError as error:
+            return {"error": str(error)}
+
     def chat_list_sessions(self):
         """Return session list without full messages (just id/title/time)."""
         return self._chat_session_service().list_sessions()

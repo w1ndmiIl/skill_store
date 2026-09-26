@@ -1,13 +1,23 @@
 """AI-assisted Skill search, parsing, and save endpoints."""
 
+import json
 import os
 import re
 
 import requests
 from ddgs import DDGS
 
-from skillhub.domain.naming import normalize_skill_filename
-from skillhub.infrastructure.filesystem import safe_child_path
+from skillhub.domain.frontmatter import (
+    preserve_frontmatter_with_missing_fields,
+    remove_markdown_frontmatter_field,
+    split_markdown_frontmatter,
+)
+from skillhub.domain.naming import (
+    is_project_rules_document,
+    normalize_agent_skill_name,
+    normalize_skill_filename,
+)
+from skillhub.infrastructure.filesystem import atomic_write_text, safe_child_path
 
 
 class AiSkillsApiMixin:
@@ -183,30 +193,45 @@ description: <一句话描述这个技能的用途>
         }
 
     def ai_save_skill(self, skill_data):
-        """Save an AI-generated skill to the global library."""
-        filename = normalize_skill_filename(skill_data.get("filename", ""), ensure_md=True)
+        """Save an AI-generated Skill as a portable <name>/SKILL.md package."""
+        requested = normalize_skill_filename(skill_data.get("filename", ""))
+        if is_project_rules_document(requested):
+            return {"error": "AGENTS.md 不允许自动 AI 修改；请在项目规约编辑器手动编辑或单独授权 AI 起草。"}
         content = skill_data.get("content", "")
-        if not filename or not content:
+        if not requested or not isinstance(content, str) or not content.strip():
             return {"error": "Missing filename or content"}
-
-        fp = safe_child_path(self.skills_dir, filename)
-        if not fp:
+        if requested.lower().endswith(".md"):
+            requested = requested[:-3]
+        base = normalize_agent_skill_name(requested, requested)
+        filename = base
+        counter = 2
+        while os.path.exists(os.path.join(self.skills_dir, filename)) or os.path.exists(
+            os.path.join(self.skills_dir, filename + ".md")
+        ):
+            suffix = f"-{counter}"
+            filename = base[:64 - len(suffix)].rstrip("-") + suffix
+            counter += 1
+        folder = safe_child_path(self.skills_dir, filename)
+        if not folder:
             return {"error": "Invalid filename"}
-        # If exists, append a numeric suffix
-        if os.path.exists(fp):
-            base = filename[:-3] if filename.lower().endswith(".md") else filename
-            counter = 1
-            while os.path.exists(fp):
-                filename = f"{base}_{counter}.md"
-                fp = safe_child_path(self.skills_dir, filename)
-                if not fp:
-                    return {"error": "Invalid filename"}
-                counter += 1
+        source_metadata, _body = split_markdown_frontmatter(content)
+        title = str(skill_data.get("title") or source_metadata.get("title") or requested).strip()
+        description = str(
+            skill_data.get("description") or source_metadata.get("description")
+            or f"Instructions and usage conditions for {title}."
+        ).strip()
+        content = remove_markdown_frontmatter_field(content, "name")
+        content = remove_markdown_frontmatter_field(content, "description")
+        content, _added = preserve_frontmatter_with_missing_fields(content, [
+            ("name", filename),
+            ("description", json.dumps(description, ensure_ascii=False)),
+            ("title", json.dumps(title, ensure_ascii=False)),
+        ])
 
         try:
             os.makedirs(self.skills_dir, exist_ok=True)
-            with open(fp, "w", encoding="utf-8") as f:
-                f.write(content)
+            os.mkdir(folder)
+            atomic_write_text(os.path.join(folder, "SKILL.md"), content)
             self._register_library_entry(filename, source="ai-generated")
             return {"ok": True, "filename": filename}
         except Exception as e:

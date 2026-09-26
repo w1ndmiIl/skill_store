@@ -3,6 +3,7 @@
 import difflib
 import hashlib
 import os
+from skillhub.domain.naming import is_project_rules_document
 import uuid
 
 from agent_runtime import SENSITIVE_INLINE_RE, SENSITIVE_VALUE_RE
@@ -20,6 +21,8 @@ class AgentChangesApiMixin:
     """Bind mutations to immutable previews and approval state."""
 
     def _tool_draft_skill_change(self, arguments):
+        if is_project_rules_document(arguments.get("filename")):
+            return {"error": "AGENTS.md 不允许自动 AI 修改；请在项目规约编辑器手动编辑或单独授权 AI 起草。"}
         filename = normalize_skill_filename(
             arguments["filename"], ensure_md=True
         )
@@ -60,6 +63,8 @@ class AgentChangesApiMixin:
         )
 
     def _tool_apply_skill_change(self, arguments):
+        if is_project_rules_document(arguments.get("filename")):
+            return {"error": "AGENTS.md 不允许自动 AI 修改；请在项目规约编辑器手动编辑或单独授权 AI 起草。"}
         filename = normalize_skill_filename(
             arguments["filename"], ensure_md=True
         )
@@ -77,6 +82,8 @@ class AgentChangesApiMixin:
         )
         if not target:
             return {"error": "Unsafe skill target path"}
+        if is_project_rules_document(os.path.realpath(target)):
+            return {"error": "AGENTS.md 不允许自动 AI 修改；请在项目规约编辑器手动编辑或单独授权 AI 起草。"}
         target_exists = bool(source and os.path.isfile(target))
         if target_exists != arguments["expected_target_exists"]:
             return {"error": "Skill target existence changed after preview; preview again"}

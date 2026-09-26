@@ -34,3 +34,8 @@ def normalize_agent_skill_name(value: str, fallback: str = "skill") -> str:
         return fallback_name
     seed = f"{value}\0{fallback}".encode("utf-8", errors="replace")
     return f"skill-{hashlib.sha256(seed).hexdigest()[:8]}"
+
+
+def is_project_rules_document(value):
+    text = str(value or "").replace("\\", "/")
+    return text.rsplit("/", 1)[-1].casefold() == "agents.md" or text.casefold().startswith("@project-rules:")

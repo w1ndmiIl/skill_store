@@ -490,12 +490,33 @@ class ToolDefinition:
         }
 
 
+import copy
+
+
+def memory_transaction(method):
+    def guarded(self, *args, **kwargs):
+        with file_lock(self.path):
+            self._data = self._load()
+            before = copy.deepcopy(self._data)
+            try:
+                return method(self, *args, **kwargs)
+            except Exception:
+                self._data = before
+                raise
+    return guarded
+
+
 class AgentMemoryStore:
     """Persistent, relevance-filtered project, preference, and decision memory."""
 
     def __init__(self, path: str):
         self.path = path
-        self._data = self._load()
+        self._load_error = ""
+        try:
+            self._data = self._load()
+        except OSError as error:
+            self._load_error = str(error)
+            self._data = self._empty()
 
     def _empty(self) -> dict[str, Any]:
         return {
@@ -507,7 +528,7 @@ class AgentMemoryStore:
         }
 
     def _load(self) -> dict[str, Any]:
-        data = load_json(self.path, self._empty())
+        data = read_json(self.path, self._empty(), lambda v: isinstance(v, dict) and v.get("version") == 1 and isinstance(v.get("projects"), dict) and isinstance(v.get("preferences"), list) and isinstance(v.get("decisions"), list))
         if not isinstance(data, dict) or data.get("version") != 1:
             return self._empty()
         base = self._empty()
@@ -518,18 +539,21 @@ class AgentMemoryStore:
     def enabled(self) -> bool:
         return bool(self._data.get("enabled", True))
 
+    @memory_transaction
     def set_enabled(self, enabled: bool) -> dict[str, Any]:
         self._data["enabled"] = bool(enabled)
-        atomic_write_json(self.path, self._data)
+        write_json(self.path, self._data, lambda v: isinstance(v, dict) and v.get("version") == 1 and isinstance(v.get("projects"), dict) and isinstance(v.get("preferences"), list) and isinstance(v.get("decisions"), list))
         return {"ok": True, "enabled": self.enabled}
 
+    @memory_transaction
     def clear(self) -> dict[str, Any]:
         enabled = self.enabled
         self._data = self._empty()
         self._data["enabled"] = enabled
-        atomic_write_json(self.path, self._data)
+        write_json(self.path, self._data, lambda v: isinstance(v, dict) and v.get("version") == 1 and isinstance(v.get("projects"), dict) and isinstance(v.get("preferences"), list) and isinstance(v.get("decisions"), list))
         return {"ok": True, "enabled": enabled}
 
+    @memory_transaction
     def remember(
         self,
         kind: str,
@@ -579,9 +603,10 @@ class AgentMemoryStore:
         else:
             self._data["decisions"].append(item)
             self._data["decisions"] = self._data["decisions"][-200:]
-        atomic_write_json(self.path, self._data)
+        write_json(self.path, self._data, lambda v: isinstance(v, dict) and v.get("version") == 1 and isinstance(v.get("projects"), dict) and isinstance(v.get("preferences"), list) and isinstance(v.get("decisions"), list))
         return {"ok": True, "memory_id": item["id"]}
 
+    @memory_transaction
     def recall(
         self,
         query: str,
@@ -628,20 +653,26 @@ class AgentMemoryStore:
         }
 
 
+from skillhub.infrastructure.json_store import file_lock, read_json, write_json
+
+
 class AgentTaskStore:
     def __init__(self, path: str, max_tasks: int = 50):
         self.path = path
         self.max_tasks = max_tasks
 
     def _load_all(self) -> list[dict[str, Any]]:
-        value = load_json(self.path, [])
-        return value if isinstance(value, list) else []
+        return read_json(self.path, [], lambda value: isinstance(value, list) and all(isinstance(t, dict) and isinstance(t.get("run_id"), str) for t in value))
 
     def save(self, task: dict[str, Any]) -> None:
+        with file_lock(self.path):
+            self._save_task(task)
+
+    def _save_task(self, task):
         tasks = self._load_all()
         tasks = [item for item in tasks if item.get("run_id") != task.get("run_id")]
         tasks.insert(0, task)
-        atomic_write_json(self.path, tasks[: self.max_tasks])
+        write_json(self.path, tasks[: self.max_tasks], lambda value: isinstance(value, list) and all(isinstance(t, dict) and isinstance(t.get("run_id"), str) for t in value))
 
     def load(self, run_id: str) -> dict[str, Any] | None:
         return next(
@@ -709,7 +740,7 @@ class RunRecorder:
 
 
 class AgentRuntime:
-    TERMINAL_STATES = {"completed", "failed", "refused", "rejected", "max_steps"}
+    TERMINAL_STATES = {"completed", "failed", "refused", "rejected", "max_steps", "cancelled"}
     MAX_IDENTICAL_DECISIONS = 4
     MAX_WRITE_POLICY_CORRECTIONS = 2
     PREVIEW_WRITE_TOOLS = {
@@ -1058,6 +1089,7 @@ class AgentRuntime:
         session_id: str = "",
         project_path: str = "",
         conversation_context: list[dict[str, Any]] | None = None,
+        deferred: bool = False,
     ) -> dict[str, Any]:
         goal = (goal or "").strip()
         if not goal:
@@ -1135,7 +1167,7 @@ class AgentRuntime:
             self._persist_and_record(task)
             return self._public(task)
         self.task_store.save(task)
-        return self._advance(task)
+        return self._public(task) if deferred else self._advance(task)
 
     def approve(self, run_id: str, approval_id: str = "") -> dict[str, Any]:
         task = self.task_store.load(run_id)
@@ -1200,6 +1232,9 @@ class AgentRuntime:
         task["status"] = "running"
         task["phase"] = f"执行已批准操作：{tool.name}"
         task["pending"] = None
+        self.task_store.save(task)
+        if self._cancelled(task):
+            return self._public(task)
         self._execute_tool(task, pending["call"], tool, pending["arguments"])
         remaining = pending.get("remaining", [])
         if remaining:
@@ -1271,8 +1306,28 @@ class AgentRuntime:
             return {"error": "Agent task not found"}
         return self._public(task)
 
+    def _cancelled(self, task):
+        if not getattr(self, "cancel_requested", lambda: False)():
+            return False
+        task.update(status="cancelled", phase="已停止 / Stopped", pending=None,
+                    final_answer="任务已停止；已完成的操作保留，未开始的操作不会执行。 / Stopped; completed changes are retained.",
+                    updated_at=utc_now())
+        self._persist_and_record(task)
+        return True
+
+    def cancel(self, run_id):
+        task = self.task_store.load(run_id)
+        if not task:
+            return {"error": "Agent task not found"}
+        if task.get("status") not in self.TERMINAL_STATES:
+            self.cancel_requested = lambda: True
+            self._cancelled(task)
+        return self._public(task)
+
     def _advance(self, task: dict[str, Any]) -> dict[str, Any]:
         while task["step_count"] < self.max_steps:
+            if self._cancelled(task):
+                return self._public(task)
             task["phase"] = "模型决策"
             task["updated_at"] = utc_now()
             self.task_store.save(task)
@@ -1284,6 +1339,8 @@ class AgentRuntime:
             except ToolCallingUnsupported as exc:
                 return self._fail(task, "ToolCallingUnsupported", str(exc))
             except requests.exceptions.Timeout:
+                if self._cancelled(task):
+                    return self._public(task)
                 return self._fail(task, "Timeout", "Agent 模型请求超时")
             except Exception as exc:
                 return self._fail(task, type(exc).__name__, str(exc))
@@ -1292,6 +1349,8 @@ class AgentRuntime:
                 "role": "assistant",
                 "content": sanitize(message.get("content") or "", max_string=8000),
             }
+            if self._cancelled(task):
+                return self._public(task)
             raw_calls = message.get("tool_calls") or []
             if not isinstance(raw_calls, list):
                 return self._fail(
@@ -1439,6 +1498,8 @@ class AgentRuntime:
 
     def _process_calls(self, task: dict[str, Any], calls: list[dict[str, Any]]) -> bool:
         for index, call in enumerate(calls):
+            if self._cancelled(task):
+                return True
             function = call.get("function") if isinstance(call, dict) else None
             name = function.get("name", "") if isinstance(function, dict) else ""
             arguments_raw = function.get("arguments", "{}") if isinstance(function, dict) else "{}"
@@ -1537,6 +1598,9 @@ class AgentRuntime:
         }
         task["timeline"].append(event)
         task["phase"] = f"执行工具：{tool.name}"
+        self.task_store.save(task)
+        if self._cancelled(task):
+            return
         started = time.monotonic()
         try:
             result = tool.handler(arguments)
@@ -1674,6 +1738,8 @@ class AgentRuntime:
         pending = task.get("pending")
         return {
             "run_id": task.get("run_id"),
+            "session_id": task.get("session_id", ""),
+            "created_at": task.get("created_at", ""),
             "status": task.get("status"),
             "phase": task.get("phase"),
             "step_count": task.get("step_count", 0),

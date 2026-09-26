@@ -13,6 +13,8 @@ let activeCollectionId = null;
 let pendingSyncSummary = null;
 let pendingSyncRequestId = 0;
 let pendingSyncTimer = null;
+let pendingSyncInFlight = false;
+let pendingSyncQueued = false;
 const modalReturnFocus = new WeakMap();
 
 // i18n & Theme State
@@ -187,7 +189,7 @@ function trapModalFocus(event, modal) {
 
 document.addEventListener('keydown', event => {
   const activeModals = Array.from(document.querySelectorAll('.modal-overlay.active'));
-  const modal = activeModals[activeModals.length - 1];
+  const modal = activeModals.sort((a,b)=>(Number(getComputedStyle(a).zIndex)||0)-(Number(getComputedStyle(b).zIndex)||0)).at(-1);
   if (!modal) {
     if (skillDrawer?.classList.contains('active')) {
       if (event.key === 'Tab') {
@@ -210,6 +212,8 @@ document.addEventListener('keydown', event => {
       'dialog-modal': closeDialogModal,
       'review-modal': () => closeStructuredReview(false),
       'editor-modal': closeEditorModal,
+      'project-rules-editor': closeProjectRulesEditor,
+      'workspace-tool-modal': closeWorkspaceTool,
       'collection-modal': closeCollectionModal,
       'global-target-modal': closeGlobalTargetModal,
       'settings-modal': closeSettingsModal,
@@ -692,6 +696,7 @@ window.addEventListener('pywebviewready', () => {
 
 async function init() {
   await fetchConfig();
+  await showStorageHealth();
   await fetchSkills();
   await fetchProjects();
   lucide.createIcons();
@@ -701,6 +706,7 @@ async function init() {
 async function fetchConfig() {
   try {
     const config = await window.pywebview.api.get_config();
+    if(config.storage_warning) showToast(config.storage_warning, 'error', {duration: 15000, actionLabel: '恢复备份 / Restore backup', onAction: recoverConfiguration});
     skillsDirPath.textContent = config.skills_dir;
     skillsDirPath.title = config.skills_dir;
     projects = config.projects || [];
@@ -739,6 +745,7 @@ function applyTheme(theme) {
 
 function applyLanguage(lang) {
   currentLanguage = lang;
+  if(typeof refreshWorkspaceLabels === "function")refreshWorkspaceLabels();
   const t = locales[lang];
   
   // Sidebar
@@ -896,23 +903,33 @@ function applyLanguage(lang) {
 // Data Layer (pywebview bridge)
 // ------------------------------------------
 
-async function fetchSkills() {
+async function fetchSkills({ throwOnError = false } = {}) {
   try {
-    skills = await window.pywebview.api.get_skills();
+    const result = await window.pywebview.api.get_skills();
+    if (!Array.isArray(result)) throw new Error(result?.error || 'Invalid skill list');
+    skills = result;
     renderCategoryFilterBar();
     renderSkillsGrid();
+    return true;
   } catch (e) {
+    if (throwOnError) throw e;
     showToast(locales[currentLanguage].toastLoadFail + e, 'error');
+    return false;
   }
 }
 
-async function fetchProjects() {
+async function fetchProjects({ throwOnError = false } = {}) {
   try {
-    projects = await window.pywebview.api.get_projects();
+    const result = await window.pywebview.api.get_projects();
+    if (!Array.isArray(result)) throw new Error(result?.error || 'Invalid project list');
+    projects = result;
     renderProjectsList();
     updateStatistics();
+    return true;
   } catch (e) {
+    if (throwOnError) throw e;
     showToast(locales[currentLanguage].toastProjectFail + e, 'error');
+    return false;
   }
 }
 
@@ -963,7 +980,13 @@ function updateStatistics() {
 async function refreshPendingSyncSummary() {
   const projectPath = currentProjectPath;
   if (!projectPath) return;
-  const requestId = ++pendingSyncRequestId;
+  if (pendingSyncInFlight) {
+    pendingSyncQueued = true;
+    return;
+  }
+  const requestId = pendingSyncRequestId;
+  pendingSyncInFlight = true;
+  pendingSyncQueued = false;
   try {
     const preview = await window.pywebview.api.preview_sync(
       projectPath,
@@ -974,15 +997,27 @@ async function refreshPendingSyncSummary() {
   } catch (_error) {
     if (requestId !== pendingSyncRequestId || projectPath !== currentProjectPath) return;
     pendingSyncSummary = null;
+  } finally {
+    pendingSyncInFlight = false;
+    // An in-flight request cannot be cancelled at the bridge. Discard its
+    // result and run only the latest selection once its debounce has elapsed.
+    if (pendingSyncQueued && pendingSyncTimer === null && currentProjectPath) {
+      void refreshPendingSyncSummary();
+    }
   }
   updateStatistics();
 }
 
 function queuePendingSyncSummary() {
   clearTimeout(pendingSyncTimer);
+  pendingSyncRequestId++;
+  pendingSyncQueued = true;
   pendingSyncSummary = null;
   updateStatistics();
-  pendingSyncTimer = setTimeout(refreshPendingSyncSummary, 100);
+  pendingSyncTimer = setTimeout(() => {
+    pendingSyncTimer = null;
+    void refreshPendingSyncSummary();
+  }, 100);
 }
 
 // ------------------------------------------
@@ -1072,6 +1107,7 @@ function renderProjectsList() {
 }
 
 function getSmartEmojiAndTags(skill) {
+  if (skill.project_rules) return {emoji: '📌', tags: []};
   let emoji = skill.emoji || '📄';
   let tags = [...(skill.tags || [])];
   
@@ -1210,7 +1246,22 @@ function renderMarkdown(markdown) {
   const metadata = frontmatter
     ? `<details class="frontmatter-panel"><summary>${currentLanguage === 'zh' ? '文档元数据' : 'Document metadata'}</summary><pre>${escapeHtml(frontmatter)}</pre></details>`
     : '';
-  return metadata + sanitizeHtml(marked.parse(body || ''));
+  const template = document.createElement('template');
+  template.innerHTML = sanitizeHtml(marked.parse(body || ''));
+  template.content.querySelectorAll('table').forEach(table => {
+    const headers = [...table.querySelectorAll('thead th')].map(cell => cell.textContent.trim());
+    if (headers.length >= 4 && table.textContent.trim().length > 160) table.classList.add('markdown-table-wide');
+    if (headers.join('|') === '技能名称|分类|标签|简述|本地链接'
+        || headers.join('|') === 'Skill|Category|Tags|Description|Local Link') table.classList.add('markdown-skill-index');
+    const scroll = document.createElement('div');
+    scroll.className = 'markdown-table-scroll';
+    scroll.tabIndex = 0;
+    scroll.setAttribute('role', 'region');
+    scroll.setAttribute('aria-label', currentLanguage === 'zh' ? '表格，可左右滚动查看' : 'Table; scroll horizontally to view');
+    table.replaceWith(scroll);
+    scroll.appendChild(table);
+  });
+  return metadata + template.innerHTML;
 }
 
 // COLLECTION_DISPLAY_METADATA_HELPER_START
@@ -1310,6 +1361,7 @@ function buildDisplaySkills() {
       is_collection: true,
       collection_id: collectionId,
       collection_members: members,
+      modified_at: Math.max(0,...members.map(m=>m.modified_at||0)),
       collection_child_count: childCount,
       collection_enabled_count: enabledCount,
       collection_configured_count: configuredCount,
@@ -1338,6 +1390,7 @@ function buildDisplaySkills() {
     const activeProject = projects.find(project => project.path === currentProjectPath);
     if (activeProject && !activeProject.error) {
       (activeProject.project_skills || []).forEach(skill => display.push(skill));
+      if (activeProject.project_rules) display.unshift(activeProject.project_rules);
     }
   }
   displaySkillsByFilename = new Map(
@@ -1355,6 +1408,9 @@ function handleCardsGridClick(event) {
   const filename = getCardFilename(event);
   if (!filename) return;
   const displaySkill = displaySkillsByFilename.get(filename);
+  if (displaySkill?.project_rules && event.target.closest('.js-edit-project-rules')) {
+    event.stopPropagation();openProjectRulesEditor(displaySkill.project_path || currentProjectPath);return;
+  }
   const globalAction = event.target.closest('.js-codex-global-action');
   if (globalAction && displaySkill) {
     event.stopPropagation();
@@ -1488,6 +1544,7 @@ function getLocalizedCategory(canonicalCat) {
 }
 
 function getSkillListIcon(skill) {
+  if (skill.project_rules) return 'pin';
   if (skill.is_collection) return 'layers-3';
   if (skill.project_only) return 'file-lock-2';
   const icons = {
@@ -1514,7 +1571,7 @@ function renderCategoryFilterBar() {
   
   // Extract all unique canonical categories from currently loaded skills
   const categoriesSet = new Set();
-  buildDisplaySkills().forEach(skill => {
+  buildDisplaySkills().filter(skill => !skill.project_rules).forEach(skill => {
     categoriesSet.add(getCanonicalCategory(skill));
   });
   
@@ -1602,9 +1659,148 @@ function resolveCollectionProjectState(
 }
 // COLLECTION_PROJECT_STATE_HELPER_END
 
+function getProjectRowContext() {
+  const activeProj = projects.find(project => project.path === currentProjectPath);
+  const statusMap = activeProj ? (activeProj.skills_status || {}) : {};
+  const managedSkills = new Set(activeProj ? (activeProj.managed_skills || []) : []);
+  const detachedSkills = new Set(activeProj ? (activeProj.detached_skills || []) : []);
+  return { activeProj, statusMap, managedSkills, detachedSkills };
+}
+
+function getSkillRowState(skill, { activeProj, statusMap, managedSkills, detachedSkills }) {
+  let statusHTML = '';
+  let isChecked = false;
+  let isPartiallyChecked = false;
+
+  if (skill.project_rules) {
+    const label = skill.available
+      ? (currentLanguage === 'zh' ? '手动维护' : 'User maintained')
+      : (currentLanguage === 'zh' ? '尚未创建' : 'Not created');
+    statusHTML = `<span class="status-badge library">${label}</span>`;
+  } else if (skill.project_only) {
+    statusHTML = `<span class="status-badge library"><span class="status-dot"></span>${currentLanguage === 'zh' ? '项目独有 · 只读' : 'Project-only · Read-only'}</span>`;
+  } else if (currentProjectPath && activeProj && !activeProj.error) {
+    let physicalStatus = statusMap[skill.filename] || 'unloaded';
+    let isLocallyEnabled = enabledSkills.has(skill.filename);
+    let isManaged = managedSkills.has(skill.filename);
+    let isDetached = detachedSkills.has(skill.filename);
+    if (skill.is_collection) {
+      const collectionState = resolveCollectionProjectState(
+        skill.collection_members,
+        statusMap,
+        enabledSkills,
+        managedSkills,
+        detachedSkills
+      );
+      isLocallyEnabled = collectionState.isLocallyEnabled;
+      isPartiallyChecked = isCollectionPartiallyEnabled(
+        skill.collection_members,
+        enabledSkills
+      );
+      physicalStatus = collectionState.physicalStatus;
+      isManaged = collectionState.isManaged;
+      isDetached = collectionState.isDetached;
+    }
+
+    if (isLocallyEnabled) {
+      isChecked = true;
+      if (physicalStatus === 'synced') {
+        statusHTML = `<span class="status-badge synced"><span class="status-dot"></span>${locales[currentLanguage].statusSynced}</span>`;
+      } else if (physicalStatus === 'out_of_sync') {
+        statusHTML = `<span class="status-badge out-of-sync"><span class="status-dot"></span>${locales[currentLanguage].statusUpdated}</span>`;
+      } else {
+        statusHTML = `<span class="status-badge pending-mount"><span class="status-dot"></span>${locales[currentLanguage].statusPendingMount}</span>`;
+      }
+    } else {
+      isChecked = false;
+      if (isPartiallyChecked) {
+        statusHTML = `<span class="status-badge pending-mount"><span class="status-dot"></span>${locales[currentLanguage].statusPartiallyEnabled}</span>`;
+      } else if (isDetached && (physicalStatus === 'synced' || physicalStatus === 'out_of_sync')) {
+        const retainedHint = currentLanguage === 'zh'
+          ? '该项目副本曾被修改；SkillHub 已停止管理并保留它。'
+          : 'This project copy was modified; SkillHub stopped managing it and retained it.';
+        statusHTML = `<span class="status-badge library" title="${escapeHtml(retainedHint)}"><span class="status-dot"></span>${locales[currentLanguage].statusProjectCustom}</span>`;
+      } else if (physicalStatus === 'synced' || physicalStatus === 'out_of_sync') {
+        const removalHint = currentLanguage === 'zh'
+          ? (isManaged
+            ? '已取消选择；项目副本将在确认同步后备份并移除。'
+            : '检测到未登记的项目副本；同步预览会显示内容差异，确认后备份并移除。')
+          : (isManaged
+            ? 'Deselected; the project copy will be backed up and removed after sync confirmation.'
+            : 'An unregistered project copy was found; sync preview will show content differences before backup and removal.');
+        statusHTML = `<span class="status-badge pending-unmount" title="${escapeHtml(removalHint)}"><span class="status-dot"></span>${locales[currentLanguage].statusPendingUnmount}</span>`;
+      } else {
+        statusHTML = `<span class="status-badge unloaded"><span class="status-dot"></span>${locales[currentLanguage].statusUnloaded}</span>`;
+      }
+    }
+  } else {
+    const globalState = skill.codex_global_status || 'unsupported';
+    const globalButton = {
+      enabled: {
+        icon: 'circle-check',
+        label: currentLanguage === 'zh' ? '已全局' : 'Global',
+        title: currentLanguage === 'zh' ? '点击管理这个 Skill 的全局目标' : 'Manage this Skill\'s global targets'
+      },
+      outdated: {
+        icon: 'refresh-cw',
+        label: currentLanguage === 'zh' ? '更新全局' : 'Update',
+        title: currentLanguage === 'zh' ? '源 Skill 已更新，点击刷新所选目标' : 'Source changed; refresh selected targets'
+      },
+      partial: {
+        icon: 'circle-dot-dashed',
+        label: currentLanguage === 'zh' ? '部分全局' : 'Partial',
+        title: currentLanguage === 'zh' ? '只有部分 Skill 或目标已启用，点击补齐' : 'Only some Skills or targets are enabled; click to complete'
+      },
+      conflict: {
+        icon: 'triangle-alert',
+        label: currentLanguage === 'zh' ? '名称冲突' : 'Conflict',
+        title: currentLanguage === 'zh' ? '至少一个目标存在同名冲突，无法覆盖' : 'At least one selected target has a name conflict'
+      },
+      disabled: {
+        icon: 'globe-2',
+        label: currentLanguage === 'zh' ? '全局启用' : 'Enable',
+        title: currentLanguage === 'zh' ? '为这个 Skill 选择要同步到的 Agent' : 'Choose the agents for this Skill'
+      },
+      unsupported: {
+        icon: 'minus',
+        label: currentLanguage === 'zh' ? '不可启用' : 'Unavailable',
+        title: currentLanguage === 'zh' ? '该条目不是可执行 Skill' : 'This entry is not an executable Skill'
+      }
+    }[globalState] || {
+      icon: 'minus',
+      label: currentLanguage === 'zh' ? '不可启用' : 'Unavailable',
+      title: currentLanguage === 'zh' ? '全局目标路径无效' : 'A global target path is invalid'
+    };
+    statusHTML = `<button type="button" class="codex-global-button ${escapeHtml(globalState)} js-codex-global-action" title="${escapeHtml(globalButton.title)}" aria-label="${escapeHtml(globalButton.title)}" ${['conflict', 'unsupported'].includes(globalState) ? 'disabled' : ''}>
+      <i data-lucide="${globalButton.icon}"></i><span>${escapeHtml(globalButton.label)}</span>
+    </button>`;
+  }
+  return { statusHTML, isChecked, isPartiallyChecked };
+}
+
+function updateSkillSelectionRows(filenames) {
+  const changed = new Set(filenames);
+  const rowContext = getProjectRowContext();
+  for (const card of cardsGrid.querySelectorAll('.skill-card')) {
+    const skill = displaySkillsByFilename.get(card.dataset.filename);
+    if (!skill || skill.project_only) continue;
+    if (!changed.has(skill.filename) && !skill.collection_members?.some(member => changed.has(member.filename))) continue;
+    const { statusHTML, isChecked, isPartiallyChecked } = getSkillRowState(skill, rowContext);
+    card.querySelector('.skill-row-status').innerHTML = statusHTML;
+    const toggle = card.querySelector('.js-toggle-skill');
+    if (toggle) {
+      toggle.checked = isChecked;
+      toggle.indeterminate = isPartiallyChecked;
+    }
+  }
+}
+
 function renderSkillsGrid() {
-  const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
   let filtered = buildDisplaySkills();
+  if (typeof workspaceFilterSkills === "function") filtered = workspaceFilterSkills(filtered);
+  const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
+  const fixedRules = filtered.filter(skill => skill.project_rules);
+  filtered = filtered.filter(skill => !skill.project_rules);
   if (navSkillCount) navSkillCount.textContent = filtered.length;
   
   // Filter by Search Query
@@ -1628,6 +1824,8 @@ function renderSkillsGrid() {
     });
   }
 
+  if (typeof paginateSkillRows === 'function') filtered = paginateSkillRows(filtered);
+  filtered = [...fixedRules, ...filtered];
   cardsGrid.innerHTML = '';
   if (filtered.length === 0) {
     if (skills.length === 0 && !query && !activeCategoryFilter) {
@@ -1657,127 +1855,26 @@ function renderSkillsGrid() {
     return;
   }
 
-  const activeProj = currentProjectPath ? projects.find(p => p.path === currentProjectPath) : null;
-  const statusMap = activeProj ? (activeProj.skills_status || {}) : {};
-  const managedSkills = new Set(activeProj ? (activeProj.managed_skills || []) : []);
-  const detachedSkills = new Set(activeProj ? (activeProj.detached_skills || []) : []);
+  const rowContext = getProjectRowContext();
+  const { activeProj } = rowContext;
   const fragment = document.createDocumentFragment();
 
   filtered.forEach(skill => {
     const card = document.createElement('div');
-    card.className = `skill-card skill-row${skill.is_collection ? ' collection-card' : ''}${skill.project_only ? ' project-only-card' : ''}`;
+    card.className = `skill-card skill-row${skill.is_collection ? ' collection-card' : ''}${skill.project_only ? ' project-only-card' : ''}${skill.project_rules ? ' project-rules-card' : ''}`;
     card.dataset.filename = skill.filename;
 
     // Keep semantic tags local; list icons come from the shared Lucide system.
     const smart = getSmartEmojiAndTags(skill);
     const resolvedTags = smart.tags;
 
-    let statusHTML = '';
-    let isChecked = false;
-    let isPartiallyChecked = false;
-
-    if (skill.project_only) {
-      statusHTML = `<span class="status-badge library"><span class="status-dot"></span>${currentLanguage === 'zh' ? '项目独有 · 只读' : 'Project-only · Read-only'}</span>`;
-    } else if (currentProjectPath && activeProj && !activeProj.error) {
-      let physicalStatus = statusMap[skill.filename] || 'unloaded';
-      let isLocallyEnabled = enabledSkills.has(skill.filename);
-      let isManaged = managedSkills.has(skill.filename);
-      let isDetached = detachedSkills.has(skill.filename);
-      if (skill.is_collection) {
-        const collectionState = resolveCollectionProjectState(
-          skill.collection_members,
-          statusMap,
-          enabledSkills,
-          managedSkills,
-          detachedSkills
-        );
-        isLocallyEnabled = collectionState.isLocallyEnabled;
-        isPartiallyChecked = isCollectionPartiallyEnabled(
-          skill.collection_members,
-          enabledSkills
-        );
-        physicalStatus = collectionState.physicalStatus;
-        isManaged = collectionState.isManaged;
-        isDetached = collectionState.isDetached;
-      }
-
-      if (isLocallyEnabled) {
-        isChecked = true;
-        if (physicalStatus === 'synced') {
-          statusHTML = `<span class="status-badge synced"><span class="status-dot"></span>${locales[currentLanguage].statusSynced}</span>`;
-        } else if (physicalStatus === 'out_of_sync') {
-          statusHTML = `<span class="status-badge out-of-sync"><span class="status-dot"></span>${locales[currentLanguage].statusUpdated}</span>`;
-        } else {
-          statusHTML = `<span class="status-badge pending-mount"><span class="status-dot"></span>${locales[currentLanguage].statusPendingMount}</span>`;
-        }
-      } else {
-        isChecked = false;
-        if (isPartiallyChecked) {
-          statusHTML = `<span class="status-badge pending-mount"><span class="status-dot"></span>${locales[currentLanguage].statusPartiallyEnabled}</span>`;
-        } else if (isDetached && (physicalStatus === 'synced' || physicalStatus === 'out_of_sync')) {
-          const retainedHint = currentLanguage === 'zh'
-            ? '该项目副本曾被修改；SkillHub 已停止管理并保留它。'
-            : 'This project copy was modified; SkillHub stopped managing it and retained it.';
-          statusHTML = `<span class="status-badge library" title="${escapeHtml(retainedHint)}"><span class="status-dot"></span>${locales[currentLanguage].statusProjectCustom}</span>`;
-        } else if (physicalStatus === 'synced' || physicalStatus === 'out_of_sync') {
-          const removalHint = currentLanguage === 'zh'
-            ? (isManaged
-              ? '已取消选择；项目副本将在确认同步后备份并移除。'
-              : '检测到未登记的项目副本；同步预览会显示内容差异，确认后备份并移除。')
-            : (isManaged
-              ? 'Deselected; the project copy will be backed up and removed after sync confirmation.'
-              : 'An unregistered project copy was found; sync preview will show content differences before backup and removal.');
-          statusHTML = `<span class="status-badge pending-unmount" title="${escapeHtml(removalHint)}"><span class="status-dot"></span>${locales[currentLanguage].statusPendingUnmount}</span>`;
-        } else {
-          statusHTML = `<span class="status-badge unloaded"><span class="status-dot"></span>${locales[currentLanguage].statusUnloaded}</span>`;
-        }
-      }
-    } else {
-      const globalState = skill.codex_global_status || 'unsupported';
-      const globalButton = {
-        enabled: {
-          icon: 'circle-check',
-          label: currentLanguage === 'zh' ? '已全局' : 'Global',
-          title: currentLanguage === 'zh' ? '点击管理这个 Skill 的全局目标' : 'Manage this Skill\'s global targets'
-        },
-        outdated: {
-          icon: 'refresh-cw',
-          label: currentLanguage === 'zh' ? '更新全局' : 'Update',
-          title: currentLanguage === 'zh' ? '源 Skill 已更新，点击刷新所选目标' : 'Source changed; refresh selected targets'
-        },
-        partial: {
-          icon: 'circle-dot-dashed',
-          label: currentLanguage === 'zh' ? '部分全局' : 'Partial',
-          title: currentLanguage === 'zh' ? '只有部分 Skill 或目标已启用，点击补齐' : 'Only some Skills or targets are enabled; click to complete'
-        },
-        conflict: {
-          icon: 'triangle-alert',
-          label: currentLanguage === 'zh' ? '名称冲突' : 'Conflict',
-          title: currentLanguage === 'zh' ? '至少一个目标存在同名冲突，无法覆盖' : 'At least one selected target has a name conflict'
-        },
-        disabled: {
-          icon: 'globe-2',
-          label: currentLanguage === 'zh' ? '全局启用' : 'Enable',
-          title: currentLanguage === 'zh' ? '为这个 Skill 选择要同步到的 Agent' : 'Choose the agents for this Skill'
-        },
-        unsupported: {
-          icon: 'minus',
-          label: currentLanguage === 'zh' ? '不可启用' : 'Unavailable',
-          title: currentLanguage === 'zh' ? '该条目不是可执行 Skill' : 'This entry is not an executable Skill'
-        }
-      }[globalState] || {
-        icon: 'minus',
-        label: currentLanguage === 'zh' ? '不可启用' : 'Unavailable',
-        title: currentLanguage === 'zh' ? '全局目标路径无效' : 'A global target path is invalid'
-      };
-      statusHTML = `<button type="button" class="codex-global-button ${escapeHtml(globalState)} js-codex-global-action" title="${escapeHtml(globalButton.title)}" aria-label="${escapeHtml(globalButton.title)}" ${['conflict', 'unsupported'].includes(globalState) ? 'disabled' : ''}>
-        <i data-lucide="${globalButton.icon}"></i><span>${escapeHtml(globalButton.label)}</span>
-      </button>`;
-    }
+    const { statusHTML, isChecked, isPartiallyChecked } = getSkillRowState(skill, rowContext);
 
     // Display translations are metadata-only; the source SKILL.md stays intact.
     const resolvedTitle = skill.display_title || skill.title;
-    let resolvedDesc = skill.display_description || skill.description;
+    let resolvedDesc = skill.project_rules
+      ? (currentLanguage === 'zh' ? '当前项目的固定开发规约' : 'Fixed development rules for this project')
+      : (skill.display_description || skill.description);
     if (skill.description === '此技能暂无详细描述信息。') {
       resolvedDesc = locales[currentLanguage].defaultDesc;
     }
@@ -1806,14 +1903,18 @@ function renderSkillsGrid() {
       ? currentProjectPath
         ? (currentLanguage === 'zh' ? `点击管理 ${resolvedTitle} 的子技能` : `Manage child skills in ${resolvedTitle}`)
         : (currentLanguage === 'zh' ? `点击查看 ${resolvedTitle} 的子技能` : `View child skills in ${resolvedTitle}`)
+      : skill.project_rules
+        ? (currentLanguage === 'zh' ? '查看当前项目的固定开发规约：AGENTS.md' : 'View fixed project rules: AGENTS.md')
       : skill.project_only
         ? (currentLanguage === 'zh' ? `只读查看项目 Skill：${resolvedTitle}` : `View project Skill read-only: ${resolvedTitle}`)
         : (currentLanguage === 'zh' ? `点击查看 ${resolvedTitle} 的 Markdown 文档` : `Click to view the Markdown document for ${resolvedTitle}`);
-    const localizedCategory = getLocalizedCategory(getCanonicalCategory(skill));
+    const localizedCategory = skill.project_rules ? (currentLanguage === 'zh' ? '项目规约' : 'Project rules') : getLocalizedCategory(getCanonicalCategory(skill));
     const collectionActionLabel = currentProjectPath
       ? (currentLanguage === 'zh' ? '管理子技能' : 'Manage child skills')
       : (currentLanguage === 'zh' ? '查看子技能' : 'View child skills');
-    const actionButtons = skill.project_only
+    const actionButtons = skill.project_rules
+      ? `<button type="button" class="row-action-button js-edit-project-rules" title="${currentLanguage === 'zh' ? '编辑项目规约' : 'Edit project rules'}" aria-label="${currentLanguage === 'zh' ? '编辑项目规约' : 'Edit project rules'}"><i data-lucide="pencil"></i></button>`
+      : skill.project_only
       ? ''
       : skill.is_collection
       ? `
@@ -1997,7 +2098,7 @@ async function handlePickProject() {
     const result = await window.pywebview.api.add_project_via_dialog();
     if (!result) return;
     if (result.error) {
-      showToast(currentLanguage === 'zh' ? '该项目已关联' : 'This project is already linked', 'warning');
+      showToast(result.error, 'error');
       return;
     }
     showToast(locales[currentLanguage].toastAssocSuccess + result.name, 'success');
@@ -2013,11 +2114,11 @@ async function handleCreateSkill() {
   const filename = await showCustomDialog({
     title: currentLanguage === 'zh' ? '新建技能' : 'New Skill',
     message: currentLanguage === 'zh'
-      ? '输入技能名称即可，文件名会自动补齐 .md；创建后可继续编辑适用场景和具体规则。'
-      : 'Enter a skill name. The .md extension is added automatically, and you can edit its triggers and rules next.',
+      ? '输入技能名称，系统会创建“名称/SKILL.md”标准文件夹；建议使用英文短名，创建后可编辑中文标题和规则。'
+      : 'Enter a skill name to create a standard name/SKILL.md folder. You can edit its display title and rules next.',
     emoji: '💡',
     isPrompt: true,
-    placeholder: currentLanguage === 'zh' ? '例如：代码安全规范' : 'e.g. Code Safety'
+    placeholder: currentLanguage === 'zh' ? '例如：code-safety' : 'e.g. code-safety'
   });
   if (!filename) return;
   try {
@@ -2039,6 +2140,8 @@ function handleSelectProject(path) {
     currentProjectPath = null;
     pendingSyncRequestId++;
     clearTimeout(pendingSyncTimer);
+    pendingSyncTimer = null;
+    pendingSyncQueued = false;
     pendingSyncSummary = null;
     enabledSkills.clear();
     currentProjectTitle.textContent = locales[currentLanguage].noProjectTitle;
@@ -2096,7 +2199,7 @@ function handleToggleSkill(filename, isEnabled) {
   if (isEnabled) enabledSkills.add(filename);
   else enabledSkills.delete(filename);
   syncBtn.classList.add('active');
-  renderSkillsGrid();
+  updateSkillSelectionRows([filename]);
   queuePendingSyncSummary();
 }
 
@@ -2108,7 +2211,7 @@ function handleToggleCollectionMount(collectionSkill, isEnabled) {
       else enabledSkills.delete(member.filename);
     });
   syncBtn.classList.add('active');
-  renderSkillsGrid();
+  updateSkillSelectionRows(collectionSkill.collection_members.map(member => member.filename));
   queuePendingSyncSummary();
 }
 
@@ -2374,7 +2477,7 @@ collectionMembersList.addEventListener('change', event => {
   }
   updateProjectCollectionMemberSelection(enabledSkills, filename, enabled);
   syncBtn.classList.add('active');
-  renderSkillsGrid();
+  updateSkillSelectionRows([filename]);
   queuePendingSyncSummary();
   const collectionId = activeCollectionId;
   if (collectionId) openCollectionModal(collectionId);
@@ -2464,12 +2567,15 @@ async function handleDeleteProject(event, path) {
   });
   if (!confirmed) return;
   try {
-    await window.pywebview.api.delete_project(path);
+    const deleted = await window.pywebview.api.delete_project(path);
+    if (deleted?.error) throw new Error(deleted.error);
     showToast(locales[currentLanguage].toastRemoveSuccess, 'success');
     if (currentProjectPath === path) {
       currentProjectPath = null;
       pendingSyncRequestId++;
       clearTimeout(pendingSyncTimer);
+      pendingSyncTimer = null;
+      pendingSyncQueued = false;
       pendingSyncSummary = null;
       currentProjectTitle.textContent = locales[currentLanguage].noProjectTitle;
       currentProjectDesc.textContent = locales[currentLanguage].noProjectDesc;
@@ -2486,7 +2592,8 @@ async function handleDeleteProject(event, path) {
 }
 
 async function handleSyncSkills() {
-  if (!currentProjectPath) return;
+  const syncProjectPath=currentProjectPath;
+  if (!syncProjectPath) return;
   const originalHTML = syncBtn.innerHTML;
   let needsSyncAttention = syncBtn.classList.contains('active');
   const setBusy = label => {
@@ -2497,7 +2604,7 @@ async function handleSyncSkills() {
   };
   const restoreButton = () => {
     syncBtn.innerHTML = originalHTML;
-    if (currentProjectPath) syncBtn.removeAttribute('disabled');
+    if (syncProjectPath) syncBtn.removeAttribute('disabled');
     syncBtn.classList.add('pulsing-btn');
     if (needsSyncAttention) syncBtn.classList.add('active');
     else syncBtn.classList.remove('active');
@@ -2508,7 +2615,7 @@ async function handleSyncSkills() {
 
   try {
     const selectedSkills = Array.from(enabledSkills);
-    let preview = await window.pywebview.api.preview_sync(currentProjectPath, selectedSkills);
+    let preview = await window.pywebview.api.preview_sync(syncProjectPath, selectedSkills);
     if (preview.error) throw new Error(preview.error);
 
     const changedCount = preview.summary.add + (preview.summary.adopt || 0) + preview.summary.modify + preview.summary.delete + preview.summary.preserve + (preview.scope_conflict_count || 0);
@@ -2540,7 +2647,7 @@ async function handleSyncSkills() {
 
     setBusy(locales[currentLanguage].syncingBtn);
     let result = await window.pywebview.api.sync_skills(
-      currentProjectPath,
+      syncProjectPath,
       selectedSkills,
       Boolean(preview.has_conflicts),
       preview.plan_token,
@@ -2566,7 +2673,7 @@ async function handleSyncSkills() {
       }
       setBusy(locales[currentLanguage].syncingBtn);
       result = await window.pywebview.api.sync_skills(
-        currentProjectPath,
+        syncProjectPath,
         selectedSkills,
         true,
         preview.plan_token,
@@ -2585,7 +2692,7 @@ async function handleSyncSkills() {
       if (!acceptedBundleFiles) return;
       setBusy(locales[currentLanguage].syncingBtn);
       result = await window.pywebview.api.sync_skills(
-        currentProjectPath,
+        syncProjectPath,
         selectedSkills,
         Boolean(preview.has_conflicts),
         preview.plan_token,
@@ -2595,6 +2702,7 @@ async function handleSyncSkills() {
     if (result.error) throw new Error(result.error);
     needsSyncAttention = false;
     showToast(locales[currentLanguage].toastSyncSuccess + result.synced_count + (currentLanguage === 'zh' ? ' 项技能' : ' skills'), 'success');
+    await saveSyncResult(syncProjectPath, preview, result);
     await fetchProjects();
     refreshCurrentProject();
   } catch (e) {
@@ -2602,7 +2710,7 @@ async function handleSyncSkills() {
     showToast(locales[currentLanguage].toastSyncFail + e, 'error');
   } finally {
     restoreButton();
-    if (currentProjectPath) queuePendingSyncSummary();
+    if (syncProjectPath) queuePendingSyncSummary();
   }
 }
 
@@ -2987,131 +3095,13 @@ async function handleImportSkill() {
 }
 
 async function checkForUnregisteredSkills() {
-  const isZh = currentLanguage === 'zh';
-  let scan;
   try {
-    scan = await window.pywebview.api.scan_unregistered_skills();
-  } catch (e) {
-    showToast((isZh ? '检查新增技能失败: ' : 'Failed to scan new skills: ') + e, 'error');
-    return;
-  }
-  if (!scan || scan.error || !scan.skills?.length) return;
-
-  const names = scan.skills.slice(0, 8).map(item => {
-    const state = item.change_type === 'modified'
-      ? (isZh ? '（内容已变化）' : ' (content changed)')
-      : '';
-    return `• ${item.filename}${state}`;
-  });
-  if (scan.skills.length > 8) {
-    names.push(isZh ? `…另有 ${scan.skills.length - 8} 个` : `…and ${scan.skills.length - 8} more`);
-  }
-  const choice = await showCustomDialog({
-    title: isZh ? `发现 ${scan.skills.length} 个待体检技能` : `${scan.skills.length} skills need validation`,
-    message: [
-      isZh
-        ? '这些技能是新复制的，或登记后内容发生了变化：'
-        : 'These skills are newly copied or changed since they were registered:',
-      '',
-      ...names,
-      '',
-      isZh
-        ? '可以逐个体检并原地优化，也可以保留原样并登记。'
-        : 'Validate and optimize them in place, or keep them unchanged and register them.'
-    ].join('\n'),
-    emoji: '🆕',
-    confirmText: isZh ? '逐个体检' : 'Validate',
-    secondaryText: isZh ? '全部保留原样' : 'Keep All',
-    secondaryValue: 'keep-all'
-  });
-  if (!choice) return;
-  if (choice === 'keep-all') {
-    for (const item of scan.skills) {
-      await window.pywebview.api.acknowledge_unregistered_skill(item.filename);
-    }
-    showToast(isZh ? '新增技能已登记并保留原样' : 'New skills registered unchanged', 'success');
-    return;
-  }
-
-  for (const item of scan.skills) {
-    let preview;
-    try {
-      preview = await window.pywebview.api.preview_unregistered_skill(item.filename);
-    } catch (e) {
-      showToast(`${item.filename}: ${e}`, 'error');
-      continue;
-    }
-    if (!preview || preview.error) {
-      showToast(`${item.filename}: ${preview?.error || 'Preview failed'}`, 'error');
-      continue;
-    }
-    const apply = await showCustomDialog({
-      title: isZh ? `体检：${item.filename}` : `Validate: ${item.filename}`,
-      message: formatImportPreview(preview),
-      emoji: preview.findings?.some(finding => finding.severity === 'high') ? '⚠️' : '📋',
-      confirmText: isZh ? '应用优化' : 'Apply',
-      secondaryText: isZh ? '保留原样' : 'Keep Original',
-      secondaryValue: 'keep'
-    });
-    if (apply === true) {
-      let acceptedHighRisk = false;
-      if (preview.has_high_risk) {
-        acceptedHighRisk = await showCustomDialog({
-          title: isZh ? '单独确认高风险项' : 'Confirm High-Risk Findings',
-          message: preview.findings
-            .filter(finding => finding.severity === 'high')
-            .map(finding => `• ${isZh ? finding.message_zh : finding.message_en}`)
-            .join('\n'),
-          emoji: '⚠️',
-          confirmText: isZh ? '确认风险并继续' : 'Accept Risk and Continue'
-        });
-        if (!acceptedHighRisk) {
-          await window.pywebview.api.discard_skill_import(preview.token);
-          continue;
-        }
-      }
-      let acceptedAiChanges = false;
-      if (preview.ai_used) {
-        acceptedAiChanges = await showCustomDialog({
-          title: isZh ? '审阅 AI 改写差异' : 'Review AI Changes',
-          message: formatAiImportDiff(preview),
-          emoji: '✨',
-          confirmText: isZh ? '接受改写并应用' : 'Accept Changes and Apply'
-        });
-        if (!acceptedAiChanges) {
-          await window.pywebview.api.discard_skill_import(preview.token);
-          continue;
-        }
-      }
-      const result = await window.pywebview.api.apply_skill_import(
-        preview.token,
-        Boolean(acceptedAiChanges),
-        Boolean(acceptedHighRisk)
-      );
-      if (result.error) {
-        showToast(`${item.filename}: ${result.error}`, 'error');
-      } else {
-        showToast(
-          isZh
-            ? `已原地处理：${result.filename}`
-            : `Processed in place: ${result.filename}`,
-          'success'
-        );
-      }
-    } else {
-      await window.pywebview.api.discard_skill_import(preview.token);
-      if (apply === 'keep') {
-        await window.pywebview.api.acknowledge_unregistered_skill(item.filename);
-      } else {
-        break;
-      }
-    }
-  }
-  await fetchSkills();
-  if (currentProjectPath) {
-    await fetchProjects();
-    refreshCurrentProject();
-  }
+    const scan = await window.pywebview.api.scan_unregistered_skills();
+    if (scan.error) throw new Error(scan.error);
+    if (scan.skills?.length) showToast(
+      uiText(`发现 ${scan.skills.length} 个待体检技能`, `${scan.skills.length} skills need inspection`), 'info',
+      {duration: 9000, actionLabel: uiText('打开队列', 'Open queue'), onAction: () => openInspectionQueue(scan.skills)});
+  } catch(e) { showToast(e.message, 'error'); }
 }
 
 function formatSyncPreview(preview) {
@@ -3662,7 +3652,9 @@ async function openEditorModal(filename) {
   activateModal(editorModal, markdownTextarea);
   try {
     const data = await window.pywebview.api.get_skill_editor_data(filename);
+    if(editingFilename!==filename || !editorModal.classList.contains("active"))return;
     if (data.error) throw new Error(data.error);
+    editorVersion = data.version;
     editorSkillContent = data.skill_content;
     editorOpenaiYamlContent = data.openai_yaml_content || '';
     editorOpenaiYamlInitialContent = editorOpenaiYamlContent;
@@ -3681,6 +3673,7 @@ async function openEditorModal(filename) {
     refreshEditorSourceUi();
     editorInitialSnapshot = getEditorSnapshot();
     updateEditorDirtyState();
+    await restoreEditorDraft();
   } catch (e) {
     showToast((currentLanguage === 'zh' ? '加载失败: ' : 'Failed to load: ') + e, 'error');
     await closeEditorModal(true);
@@ -3696,13 +3689,17 @@ async function openSkillViewer(filename) {
   const skill = displaySkillsByFilename.get(filename) || skills.find(s => s.filename === filename);
   if (!skill || !skillDrawer) return;
   activeDrawerFilename = filename;
+  skillDrawer.classList.remove('has-wide-table');
+  const requestedProject = currentProjectPath;
   drawerReturnFocus = document.activeElement;
   const smart = getSmartEmojiAndTags(skill);
-  const category = getLocalizedCategory(getCanonicalCategory(skill));
+  const category = skill.project_rules ? (currentLanguage === 'zh' ? '项目规约' : 'Project rules') : getLocalizedCategory(getCanonicalCategory(skill));
   const displayTitle = skill.display_title || skill.title || filename;
   skillDetailEmoji.textContent = smart.emoji;
   skillDetailTitle.textContent = displayTitle;
-  skillDetailKind.textContent = skill.project_only
+  skillDetailKind.textContent = skill.project_rules
+    ? (currentLanguage === 'zh' ? '当前项目的固定开发规约' : 'Fixed development rules for this project')
+    : skill.project_only
     ? (currentLanguage === 'zh' ? '项目 Skill · 只读' : 'Project Skill · Read-only')
     : (currentLanguage === 'zh' ? 'Skill 文档' : 'Skill document');
   skillDetailMeta.innerHTML = `
@@ -3721,7 +3718,7 @@ async function openSkillViewer(filename) {
     appContainer.inert = true;
   }
   setTimeout(() => skillDetailClose?.focus(), 0);
-  skillDetailEdit.style.display = skill.project_only ? 'none' : '';
+  skillDetailEdit.style.display = skill.project_only && !skill.project_rules ? 'none' : '';
   skillDetailDelete.style.display = skill.project_only ? 'none' : '';
   const showCodexGlobalAction = (
     !currentProjectPath
@@ -3742,7 +3739,9 @@ async function openSkillViewer(filename) {
         openGlobalTargetModal(skill);
       }
     : null;
-  skillDetailEdit.onclick = skill.project_only ? null : () => {
+  skillDetailEdit.onclick = skill.project_rules
+    ? () => { closeSkillDrawer(false);openProjectRulesEditor(requestedProject); }
+    : skill.project_only ? null : () => {
     closeSkillDrawer(false);
     openEditorModal(filename);
   };
@@ -3751,16 +3750,20 @@ async function openSkillViewer(filename) {
     handleDeleteSkill(filename);
   };
   try {
-    const data = skill.project_only
+    const data = skill.project_rules
+      ? await window.pywebview.api.get_project_rules_content(requestedProject)
+      : skill.project_only
       ? await window.pywebview.api.get_project_skill_content(
-          currentProjectPath,
+          requestedProject,
           skill.project_relative_path
         )
       : await window.pywebview.api.get_skill_content(filename);
     if (data.error) throw new Error(data.error);
-    if (activeDrawerFilename !== filename) return;
+    if (activeDrawerFilename !== filename || (skill.project_only && currentProjectPath !== requestedProject)) return;
     skillDetailContent.innerHTML = renderMarkdown(data.content);
+    skillDrawer.classList.toggle('has-wide-table', Boolean(skillDetailContent.querySelector('.markdown-table-wide')));
   } catch (e) {
+    if (activeDrawerFilename !== filename || (skill.project_only && currentProjectPath !== requestedProject)) return;
     showToast((currentLanguage === 'zh' ? '加载失败: ' : 'Failed to load: ') + e, 'error');
     closeSkillDrawer();
   }
@@ -3793,14 +3796,15 @@ async function closeEditorModal(force = false) {
     const discard = await showCustomDialog({
       title: currentLanguage === 'zh' ? '放弃未保存修改？' : 'Discard unsaved changes?',
       message: currentLanguage === 'zh'
-        ? 'SKILL.md、分类或使用配置中的修改尚未保存。关闭后将无法恢复。'
-        : 'Changes to SKILL.md, its category, or usage configuration have not been saved and cannot be recovered after closing.',
+        ? 'SKILL.md、分类或使用配置中的修改尚未保存。关闭后可从本地草稿恢复。'
+        : 'Changes to SKILL.md, its category, or usage configuration have not been saved and can be recovered from the local draft after closing.',
       emoji: '⚠️',
       confirmText: currentLanguage === 'zh' ? '放弃修改' : 'Discard changes'
     });
     editorClosePending = false;
     if (!discard) return;
   }
+  await retainEditorDraft();
   deactivateModal(editorModal);
   editingFilename = null;
   isViewingSkill = false;
@@ -3844,12 +3848,14 @@ function switchModalTab(tab) {
 
 async function handleSaveSkill() {
   if (isViewingSkill) return;
-  if (!editingFilename) return;
+  if (!editingFilename || editorSaveBusy) return;
+  editorSaveBusy = true; modalSaveBtn.disabled = true;
   try {
     syncActiveEditorBuffer();
     if (editorOpenaiFormDirty) await renderOpenaiFormToYaml();
     const skillContent = getEditorContentWithCategory();
     const result = await window.pywebview.api.save_skill_editor_data(editingFilename, {
+      expected_version: editorVersion,
       skill_content: skillContent,
       openai_yaml_content: editorOpenaiYamlContent,
       save_openai_yaml: (
@@ -3858,7 +3864,9 @@ async function handleSaveSkill() {
         || editorOpenaiYamlCreateRequested
       ),
     });
+    if (result.conflict) { await resolveEditorConflict(result); return; }
     if (result.error) throw new Error(result.error);
+    await clearEditorDraft();editorInitialSnapshot=null;
     showToast(locales[currentLanguage].toastSaveSuccess, 'success');
     await closeEditorModal(true);
     await fetchSkills();
@@ -3869,7 +3877,7 @@ async function handleSaveSkill() {
     }
   } catch (e) {
     showToast((currentLanguage === 'zh' ? '保存失败: ' : 'Failed to save: ') + e, 'error');
-  }
+  } finally { editorSaveBusy = false; modalSaveBtn.disabled = false; }
 }
 
 // ------------------------------------------
@@ -3935,6 +3943,7 @@ async function handleChangeSkillsDir() {
   try {
     const result = await window.pywebview.api.change_skills_dir();
     if (!result) return;
+    if (result.error) throw new Error(result.error);
     showToast(locales[currentLanguage].toastPathUpdate, 'success');
     skillsDirPath.textContent = result.skills_dir;
     skillsDirPath.title = result.skills_dir;
@@ -3951,9 +3960,9 @@ async function handleRefreshSkills() {
     icon.classList.add('spinning');
   }
   try {
-    await fetchSkills();
+    await fetchSkills({ throwOnError: true });
     if (currentProjectPath) {
-      await fetchProjects();
+      await fetchProjects({ throwOnError: true });
       
       const proj = projects.find(p => p.path === currentProjectPath);
       if (proj) {
@@ -4069,6 +4078,7 @@ async function handleSettingsPickSkillsDir() {
   try {
     const result = await window.pywebview.api.change_skills_dir();
     if (!result) return;
+    if (result.error) throw new Error(result.error);
     settingsSkillsDir.value = result.skills_dir;
     showToast(locales[currentLanguage].toastPathUpdate, 'success');
   } catch (e) {
@@ -4080,6 +4090,7 @@ async function handleSettingsPickScanDir() {
   try {
     const result = await window.pywebview.api.pick_default_scan_dir();
     if (!result) return;
+    if (result.error) throw new Error(result.error);
     settingsScanDir.value = result.default_scan_dir;
     showToast(currentLanguage === 'zh' ? '默认扫描起点已更新' : 'Default projects path updated', 'success');
   } catch (e) {
@@ -4107,6 +4118,9 @@ async function handleSaveSettings() {
       );
       return;
     }
+    settings.deepseek_api_key = document.getElementById('settings-apikey').value.trim();
+    settings.deepseek_model = document.getElementById('settings-aimodel').value.trim() || deepseekModel;
+    settings.api_base = document.getElementById('settings-apibase').value.trim() || apiBase;
     const result = await window.pywebview.api.save_settings(settings);
     if (result.error) throw new Error(result.error);
 
@@ -4117,15 +4131,8 @@ async function handleSaveSettings() {
     const newModel = modelInput.value.trim() || deepseekModel;
     const newApiBase = apiBaseInput.value.trim() || apiBase;
 
-    if (apiKeyInput.value.trim() || newApiBase !== apiBase || newModel !== deepseekModel) {
-      const aiResult = await window.pywebview.api.save_ai_config(
-        apiKeyInput.value.trim(),
-        newModel,
-        newApiBase
-      );
-      hasAiKey = Boolean(aiResult.has_ai_key);
-      apiKeyHint = aiResult.api_key_hint || apiKeyHint;
-    }
+    hasAiKey = Boolean(result.has_ai_key);
+    apiKeyHint = result.api_key_hint || '';
     deepseekModel = newModel;
     apiBase = newApiBase;
 
@@ -4296,7 +4303,6 @@ function resizeAgentChatInput() {
 aiChatInput?.addEventListener('input', resizeAgentChatInput);
 
 async function openAIModal() {
-  aiIsLoading = false;
   aiGeneratedSkill = null;
   aiSkillPreview.style.display = 'none';
   try {
@@ -4316,135 +4322,26 @@ async function openAIModal() {
 }
 
 async function closeAIModal() {
-  deactivateModal(aiModal);
-  await saveCurrentSession();
+  if (await confirmSessionLeave()) deactivateModal(aiModal);
 }
 
-async function loadSessionList(selectSession = false) {
-  try {
-    allSessions = await window.pywebview.api.chat_list_sessions();
-  } catch (e) {
-    if (selectSession) allSessions = [];
-  }
-  renderSessionList();
-  if (!selectSession) return;
+// loadSessionList is implemented in session-controller.js.
 
-  const preferredSession = allSessions.find(session => session.id === currentSessionId) || allSessions[0];
-  if (preferredSession) {
-    await switchToSession(preferredSession.id, false);
-  } else {
-    await createNewSession(false);
-  }
-}
 
-function renderSessionList() {
-  aiSessionList.innerHTML = '';
-  allSessions.forEach(s => {
-    const div = document.createElement('div');
-    div.className = 'ai-session-item' + (s.id === currentSessionId ? ' active' : '');
-    div.onclick = async () => { await switchToSession(s.id); };
-    div.innerHTML = `
-      <div class="ai-session-item-title">${escapeHtml(s.title || (currentLanguage === 'zh' ? '未命名' : 'Untitled'))}</div>
-      <div class="ai-session-item-meta">${s.msg_count || 0} ${currentLanguage === 'zh' ? '条消息' : 'messages'}</div>
-      <button class="ai-session-del" onclick="event.stopPropagation();deleteSession('${s.id}')" title="${currentLanguage === 'zh' ? '删除' : 'Delete'}">×</button>`;
-    aiSessionList.appendChild(div);
-  });
-}
+// renderSessionList is implemented in session-controller.js.
 
-async function switchToSession(sid, saveBeforeSwitch = true) {
-  if (sid === currentSessionId && aiChatHistory.length > 0) {
-    renderSessionList();
-    renderChatHistory();
-    return;
-  }
-  if (saveBeforeSwitch) {
-    await saveCurrentSession();
-  }
-  currentSessionId = sid;
-  aiChatHistory = [];
-  aiSkillPreview.style.display = 'none';
-  aiGeneratedSkill = null;
 
-  try {
-    const r = await window.pywebview.api.chat_load_session(sid);
-    if (r.session && r.session.messages) {
-      aiChatHistory = r.session.messages;
-    }
-  } catch (e) { /* ignore */ }
+// switchToSession is implemented in session-controller.js.
 
-  renderSessionList();
-  renderChatHistory();
-  await loadAgentRunForSession();
-}
 
-async function createNewSession(saveBeforeCreate = true) {
-  if (saveBeforeCreate) {
-    await saveCurrentSession();
-  }
-  currentSessionId = 's_' + Date.now();
-  aiChatHistory = [];
-  aiSkillPreview.style.display = 'none';
-  aiGeneratedSkill = null;
-  currentAgentRunId = null;
-  currentAgentApprovalId = null;
-  allSessions.unshift({
-    id: currentSessionId,
-    title: currentLanguage === 'zh' ? '新会话' : 'New Chat',
-    msg_count: 0
-  });
-  renderSessionList();
-  renderChatHistory();
-  resetAgentRunPanel();
-}
+// createNewSession is implemented in session-controller.js.
 
-async function deleteSession(sid) {
-  try { await window.pywebview.api.chat_delete_session(sid); } catch (e) {}
-  allSessions = allSessions.filter(s => s.id !== sid);
-  if (sid === currentSessionId) {
-    currentSessionId = null;
-    aiChatHistory = [];
-  }
-  renderSessionList();
-  if (allSessions.length > 0 && !currentSessionId) {
-    await switchToSession(allSessions[0].id, false);
-  } else if (allSessions.length === 0) {
-    await createNewSession(false);
-  }
-  renderChatHistory();
-}
 
-async function saveCurrentSession() {
-  if (!currentSessionId || aiChatHistory.length === 0) return true;
-  const title = aiChatHistory.find(m => m.role === 'user')?.content?.slice(0, 30)
-    || (currentLanguage === 'zh' ? '未命名' : 'Untitled');
-  const messages = aiChatHistory.map(message => ({ ...message }));
-  try {
-    const result = await window.pywebview.api.chat_save_session(
-      currentSessionId,
-      title,
-      messages
-    );
-    if (result?.error) throw new Error(result.error);
-    const existing = allSessions.find(session => session.id === currentSessionId);
-    if (existing) {
-      existing.title = title;
-      existing.msg_count = messages.length;
-    } else {
-      allSessions.unshift({
-        id: currentSessionId,
-        title,
-        msg_count: messages.length
-      });
-    }
-    return true;
-  } catch (e) {
-    showToast(
-      (currentLanguage === 'zh' ? '会话保存失败: ' : 'Failed to save chat: ') + (e.message || e),
-      'error'
-    );
-    return false;
-  }
-}
+// deleteSession is implemented in session-controller.js.
+
+
+// saveCurrentSession is implemented in session-controller.js.
+
 
 function renderChatHistory() {
   aiChatMessages.innerHTML = '';
@@ -4540,6 +4437,7 @@ function agentStatusLabel(status) {
     completed: currentLanguage === 'zh' ? '已完成' : 'Completed',
     failed: currentLanguage === 'zh' ? '失败' : 'Failed',
     rejected: currentLanguage === 'zh' ? '已拒绝' : 'Rejected',
+    cancelled: currentLanguage === 'zh' ? '已停止' : 'Stopped',
     max_steps: currentLanguage === 'zh' ? '已停止' : 'Stopped'
   };
   return labels[status] || status || (currentLanguage === 'zh' ? '空闲' : 'Idle');
@@ -4676,75 +4574,14 @@ function renderAgentRun(result) {
   lucide.createIcons();
 }
 
-async function loadAgentRunForSession() {
-  if (!currentSessionId) {
-    resetAgentRunPanel();
-    return;
-  }
-  try {
-    const tasks = await window.pywebview.api.agent_list_tasks();
-    const task = (tasks || []).find(item => item.session_id === currentSessionId);
-    if (!task) {
-      resetAgentRunPanel();
-      return;
-    }
-    const result = await window.pywebview.api.agent_get_task(task.run_id);
-    if (result && !result.error) renderAgentRun(result);
-  } catch (_error) {
-    resetAgentRunPanel();
-  }
-}
+// loadAgentRunForSession is implemented in session-controller.js.
 
-async function approveAgentAction() {
-  if (!currentAgentRunId || !currentAgentApprovalId || aiIsLoading) return;
-  aiIsLoading = true;
-  aiSendBtn.disabled = true;
-  agentPhase.textContent = currentLanguage === 'zh' ? '执行已批准操作…' : 'Applying approved action…';
-  try {
-    const result = await window.pywebview.api.agent_approve(
-      currentAgentRunId,
-      currentAgentApprovalId
-    );
-    if (result.error) throw new Error(result.error);
-    renderAgentRun(result);
-    if (result.final_answer) {
-      appendChatBubble('ai', result.final_answer);
-      aiChatHistory.push({ role: 'assistant', content: result.final_answer });
-      await saveCurrentSession();
-      await loadSessionList(false);
-    }
-    await Promise.all([fetchSkills(), fetchProjects()]);
-  } catch (error) {
-    appendChatBubble('ai', '❌ ' + (error.message || error));
-  } finally {
-    aiIsLoading = false;
-    aiSendBtn.disabled = false;
-  }
-}
 
-async function resumeAgentRun() {
-  if (!currentAgentRunId || aiIsLoading) return;
-  aiIsLoading = true;
-  aiSendBtn.disabled = true;
-  agentResumeButton.hidden = true;
-  agentPhase.textContent = currentLanguage === 'zh' ? '正在恢复持久化任务…' : 'Resuming persisted task…';
-  try {
-    const result = await window.pywebview.api.agent_resume(currentAgentRunId);
-    if (result.error) throw new Error(result.error);
-    renderAgentRun(result);
-    if (result.final_answer) {
-      appendChatBubble('ai', result.final_answer);
-      aiChatHistory.push({ role: 'assistant', content: result.final_answer });
-      await saveCurrentSession();
-      await loadSessionList(false);
-    }
-  } catch (error) {
-    appendChatBubble('ai', '❌ ' + (error.message || error));
-  } finally {
-    aiIsLoading = false;
-    aiSendBtn.disabled = false;
-  }
-}
+// approveAgentAction is implemented in session-controller.js.
+
+
+// resumeAgentRun is implemented in session-controller.js.
+
 
 async function rejectAgentAction() {
   if (!currentAgentRunId || aiIsLoading) return;
@@ -4842,60 +4679,8 @@ async function clearAgentMemory() {
   }
 }
 
-async function sendAIMessage() {
-  const text = aiChatInput.value.trim();
-  if (!text || aiIsLoading) return;
+// sendAIMessage is implemented in session-controller.js.
 
-  const emptyEl = aiChatMessages.querySelector('.ai-chat-empty');
-  if (emptyEl) emptyEl.remove();
-
-  appendChatBubble('user', text);
-  aiChatInput.value = '';
-  resizeAgentChatInput();
-  aiChatHistory.push({ role: 'user', content: text });
-
-  const typingId = showTypingIndicator();
-  aiIsLoading = true;
-  aiSendBtn.setAttribute('disabled', 'true');
-  renderAgentWorkingState();
-
-  try {
-    const result = await window.pywebview.api.agent_start(
-      text,
-      currentSessionId || '',
-      currentProjectPath || ''
-    );
-    removeTypingIndicator(typingId);
-    if (result.error) {
-      appendChatBubble('ai', '❌ ' + result.error);
-      agentStatusBadge.textContent = currentLanguage === 'zh' ? '失败' : 'Failed';
-      agentStatusBadge.className = 'agent-status-badge failed';
-      agentPhase.textContent = result.error;
-      agentRunId.textContent = currentLanguage === 'zh' ? '未创建运行' : 'Run not created';
-    } else {
-      currentAgentRunId = result.run_id;
-      renderAgentRun(result);
-      if (result.final_answer) {
-        appendChatBubble('ai', result.final_answer);
-        aiChatHistory.push({ role: 'assistant', content: result.final_answer });
-      } else if (result.status === 'waiting_approval') {
-        appendChatBubble('ai', '需要你的批准才能继续执行右侧显示的写操作。');
-      }
-    }
-    await saveCurrentSession();
-    await loadSessionList(false);
-  } catch (e) {
-    removeTypingIndicator(typingId);
-    appendChatBubble('ai', '❌ ' + (e.message || e));
-    agentStatusBadge.textContent = currentLanguage === 'zh' ? '失败' : 'Failed';
-    agentStatusBadge.className = 'agent-status-badge failed';
-    agentPhase.textContent = String(e.message || e);
-  } finally {
-    aiIsLoading = false;
-    aiSendBtn.removeAttribute('disabled');
-    aiChatInput.focus();
-  }
-}
 
 async function handleNewSession() {
   await createNewSession();
@@ -4947,7 +4732,12 @@ async function handleAISave() {
   if (!fname) fname = 'ai_generated_skill';
   fname += '.md';
   try {
-    const r = await window.pywebview.api.ai_save_skill({ filename: fname, content: aiGeneratedSkill.content });
+    const r = await window.pywebview.api.ai_save_skill({
+      filename: fname,
+      title: aiGeneratedSkill.title,
+      description: aiGeneratedSkill.description,
+      content: aiGeneratedSkill.content
+    });
     if (r.error) throw new Error(r.error);
     showToast((currentLanguage === 'zh' ? '✅ 已保存: ' : '✅ Saved: ') + r.filename, 'success');
     aiSkillPreview.style.display = 'none';

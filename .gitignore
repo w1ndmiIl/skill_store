@@ -27,15 +27,18 @@ agent_backups/
 AGENTS.md
 /original-skills/
 /docs/SkillHub项目说明-简历版.md
-/tests/*
-!/tests/test_codex_global_skills.py
-!/tests/test_frontend_collection_display.py
-!/tests/test_frontend_ui_quality.py
-!/tests/test_modular_architecture.py
-!/tests/test_refactored_workflows.py
-!/tests/test_project_sync_ownership.py
-!/tests/test_skill_package_editor.py
-!/tests/test_agent_session_context.py
+# Docs generated for local audit and delivery evidence
+/docs/AUDIT_*.md
+/docs/IMPLEMENTED_*.md
+/docs/PROJECT_RULES_CARD_*.md
+/docs/PROJECT_RULES_EDITING_*.md
+/docs/UI_FILTER_LAYOUT_*.md
+/docs/WORKSPACE_LAYOUT.md
+/.local/
+
+# Local navigation shortcuts and generated deliverables
+/本地入口/
+/output/
 
 # Legacy/runtime skills folder (active libraries live outside the repository)
 /skills/
@@ -46,3 +49,6 @@ AGENTS.md
 # OS
 .DS_Store
 Thumbs.db
+
+# Local browser verification artifacts
+/.playwright-cli/

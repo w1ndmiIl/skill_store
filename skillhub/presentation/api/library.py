@@ -1,5 +1,6 @@
 """Skill library query, editing, deletion, and restoration endpoints."""
 
+import json
 import os
 import re
 import shutil
@@ -15,7 +16,11 @@ from skillhub.domain.frontmatter import (
     split_markdown_frontmatter_source,
 )
 from skillhub.domain.global_targets import GLOBAL_SKILL_TARGETS, SKILL_LIBRARY_STATE_DIR
-from skillhub.domain.naming import normalize_skill_filename
+from skillhub.domain.naming import (
+    is_project_rules_document,
+    normalize_agent_skill_name,
+    normalize_skill_filename,
+)
 from skillhub.infrastructure.filesystem import (
     atomic_write_json,
     atomic_write_text,
@@ -99,6 +104,13 @@ class LibraryApiMixin:
 
         display_localizations = self._load_display_localizations()
         for skill in skills:
+            source = os.path.join(self.skills_dir, skill.get("virtual_parent", ""), skill.get("virtual_source", "")) if skill.get("is_virtual") else os.path.join(self.skills_dir, skill["filename"])
+            if os.path.isdir(source):
+                source = os.path.join(source, "SKILL.md" if skill.get("folder_kind") == "standard" else "README.md")
+            try:
+                skill["modified_at"] = os.stat(source).st_mtime
+            except OSError:
+                skill["modified_at"] = 0
             self._apply_display_localization(skill, display_localizations)
 
         skills_by_name = {
@@ -190,16 +202,7 @@ class LibraryApiMixin:
         if not registered_project:
             return {"error": "Project is not registered"}
 
-        project_entry = next(
-            (
-                item
-                for item in self.get_projects()
-                if os.path.normcase(
-                    os.path.realpath(os.path.abspath(item.get("path", "")))
-                ) == requested_project
-            ),
-            {},
-        )
+        project_entry = self.get_project(registered_project)
         allowed_paths = {
             item.get("project_relative_path", "")
             for item in project_entry.get("project_skills", [])
@@ -432,8 +435,8 @@ class LibraryApiMixin:
                 collection_snapshot = self._load_skill_collections()
                 trash_token = uuid.uuid4().hex
                 trash_root = safe_real_child_path(
-                    os.path.join(self.skills_dir, SKILL_LIBRARY_STATE_DIR, "trash"),
-                    trash_token,
+                    self.skills_dir,
+                    os.path.join(SKILL_LIBRARY_STATE_DIR, "trash", trash_token),
                 )
                 if not trash_root:
                     return {"error": "Invalid trash path"}
@@ -504,8 +507,8 @@ class LibraryApiMixin:
         if not re.fullmatch(r"[0-9a-f]{32}", trash_token or ""):
             return {"error": "Invalid trash token"}
         trash_root = safe_real_child_path(
-            os.path.join(self.skills_dir, SKILL_LIBRARY_STATE_DIR, "trash"),
-            trash_token,
+            self.skills_dir,
+            os.path.join(SKILL_LIBRARY_STATE_DIR, "trash", trash_token),
         )
         if not trash_root or not os.path.isdir(trash_root):
             return {"error": "Deleted skill is no longer available"}
@@ -521,7 +524,19 @@ class LibraryApiMixin:
             shutil.move(source, target)
             collections = metadata.get("collections")
             if isinstance(collections, dict):
-                self._save_skill_collections(collections)
+                current = self._load_skill_collections()
+                current_collections = current.setdefault("collections", [])
+                for old in collections.get("collections", []):
+                    if old.get("bundle_parent") != filename and filename not in old.get("members", []):
+                        continue
+                    existing = next((c for c in current_collections if c.get("id") == old.get("id")), None)
+                    if existing is None:
+                        current_collections.append(old)
+                    else:
+                        restored_members = old.get("members", []) if old.get("bundle_parent") == filename else [filename]
+                        existing["members"] = list(dict.fromkeys([*existing.get("members", []), *restored_members]))
+                        existing["enabled_members"] = list(dict.fromkeys([*existing.get("enabled_members", []), *[m for m in old.get("enabled_members", []) if m in restored_members]]))
+                self._save_skill_collections(current)
             self._register_library_entry(filename, source="restored")
             warning = ""
             enabled_targets = metadata.get("global_targets_were_enabled", [])
@@ -549,23 +564,27 @@ class LibraryApiMixin:
             return {"error": str(exc)}
 
     def create_skill(self, filename):
-        """Create a new skill file with a dynamic bilingual template based on current settings."""
-        filename = normalize_skill_filename(filename, ensure_md=True)
-        if not filename:
-            return {"error": "Invalid filename"}
-        fp = safe_child_path(self.skills_dir, filename)
-        if not fp:
-            return {"error": "Invalid filename"}
-        if os.path.exists(fp):
+        """Create a portable <name>/SKILL.md package with a bilingual template."""
+        requested = normalize_skill_filename(filename)
+        if requested.lower().endswith(".md"):
+            requested = requested[:-3]
+        if not requested or is_project_rules_document(filename):
+            return {"error": "Invalid skill name"}
+        skill_name = normalize_agent_skill_name(requested, requested)
+        folder = safe_child_path(self.skills_dir, skill_name)
+        if not folder:
+            return {"error": "Invalid skill name"}
+        if os.path.exists(folder) or os.path.exists(folder + ".md"):
             return {"error": "该文件已存在" if self.language == "zh" else "This file already exists"}
 
-        title = os.path.splitext(filename)[0].replace("_", " ").replace("-", " ").strip()
+        title = requested.replace("_", " ").replace("-", " ").strip()
         if not title:
             title = "New Skill Guideline" if self.language == "en" else "新增技能指南"
 
         if self.language == "en":
             template = f"""---
-title: {title}
+name: {skill_name}
+title: {json.dumps(title, ensure_ascii=False)}
 emoji: 💡
 tags: Rules, Basic
 description: Define the purpose, usage triggers, and development constraints for {title}.
@@ -581,7 +600,8 @@ Write down the specific development guidelines, design principles, and quality r
 """
         else:
             template = f"""---
-title: {title}
+name: {skill_name}
+title: {json.dumps(title, ensure_ascii=False)}
 emoji: 💡
 tags: 规范, 基础
 description: 定义“{title}”的适用场景、触发条件与开发约束。
@@ -597,9 +617,9 @@ description: 定义“{title}”的适用场景、触发条件与开发约束。
 """
         try:
             os.makedirs(self.skills_dir, exist_ok=True)
-            with open(fp, "w", encoding="utf-8") as f:
-                f.write(template)
-            self._register_library_entry(filename, source="created")
-            return {"ok": True, "filename": filename}
+            os.mkdir(folder)
+            atomic_write_text(os.path.join(folder, "SKILL.md"), template)
+            self._register_library_entry(skill_name, source="created")
+            return {"ok": True, "filename": skill_name}
         except Exception as e:
             return {"error": str(e)}
