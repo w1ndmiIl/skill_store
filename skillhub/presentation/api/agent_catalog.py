@@ -211,6 +211,7 @@ class AgentCatalogApiMixin:
                 content,
                 compatibility_name,
                 package_size,
+                layout="markdown" if is_top_level_file else "standard",
             )
             for issue in compatibility["findings"]:
                 findings.append({

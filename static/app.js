@@ -2114,11 +2114,11 @@ async function handleCreateSkill() {
   const filename = await showCustomDialog({
     title: currentLanguage === 'zh' ? '新建技能' : 'New Skill',
     message: currentLanguage === 'zh'
-      ? '输入技能名称即可，文件名会自动补齐 .md；创建后可继续编辑适用场景和具体规则。'
-      : 'Enter a skill name. The .md extension is added automatically, and you can edit its triggers and rules next.',
+      ? '输入技能名称，系统会创建“名称/SKILL.md”标准文件夹；建议使用英文短名，创建后可编辑中文标题和规则。'
+      : 'Enter a skill name to create a standard name/SKILL.md folder. You can edit its display title and rules next.',
     emoji: '💡',
     isPrompt: true,
-    placeholder: currentLanguage === 'zh' ? '例如：代码安全规范' : 'e.g. Code Safety'
+    placeholder: currentLanguage === 'zh' ? '例如：code-safety' : 'e.g. code-safety'
   });
   if (!filename) return;
   try {
@@ -4732,7 +4732,12 @@ async function handleAISave() {
   if (!fname) fname = 'ai_generated_skill';
   fname += '.md';
   try {
-    const r = await window.pywebview.api.ai_save_skill({ filename: fname, content: aiGeneratedSkill.content });
+    const r = await window.pywebview.api.ai_save_skill({
+      filename: fname,
+      title: aiGeneratedSkill.title,
+      description: aiGeneratedSkill.description,
+      content: aiGeneratedSkill.content
+    });
     if (r.error) throw new Error(r.error);
     showToast((currentLanguage === 'zh' ? '✅ 已保存: ' : '✅ Saved: ') + r.filename, 'success');
     aiSkillPreview.style.display = 'none';

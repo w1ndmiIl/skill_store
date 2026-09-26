@@ -44,6 +44,8 @@ Import → local inspection → categorization or collection organization → pr
 
 SkillHub imports Markdown, ZIP files, standard `SKILL.md` folders, and repository collections. It provides one workspace for browsing, search, categories, editing, display localization, trash recovery, and deterministic inspection while keeping display metadata separate from source semantics.
 
+New Skills should use `<name>/SKILL.md`. Legacy single-file Skills remain usable; import inspection and library audits flag their layout.
+
 #### Multi-Skill collections
 
 ![English Skill collection manager](docs/screenshots/en/collection-manager.png)

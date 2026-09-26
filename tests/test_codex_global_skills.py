@@ -411,6 +411,47 @@ allowed-tools:
             self.assertEqual(result["targets"]["gemini_cli"]["status"], "adapted")
             self.assertTrue(result["findings"])
 
+    def test_flat_skill_layout_is_reported_without_disabling_compatibility(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            flat = Path(temporary) / "legacy.md"
+            flat.write_text(
+                "---\nname: legacy\ndescription: Keep this workflow.\n---\n\n# Workflow\n",
+                encoding="utf-8",
+            )
+            api = self.make_api(Path(temporary))
+
+            result = api._inspect_import_compatibility(
+                str(flat), "markdown", "legacy.md"
+            )
+
+            self.assertIn(
+                "nonstandard_skill_layout",
+                {finding["code"] for finding in result["findings"]},
+            )
+            self.assertEqual(result["targets"]["codex"]["status"], "ready")
+            audit = api._tool_audit_skill_library({"minimum_severity": "warning"})
+            self.assertIn(
+                "nonstandard_skill_layout",
+                {finding["code"] for finding in audit["findings"]},
+            )
+
+    def test_standard_skill_name_must_match_folder_in_audit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary) / "installed-name"
+            folder.mkdir()
+            (folder / "SKILL.md").write_text(
+                "---\nname: upstream-name\ndescription: Keep this workflow.\n---\n\n# Workflow\n",
+                encoding="utf-8",
+            )
+            api = self.make_api(Path(temporary))
+
+            audit = api._tool_audit_skill_library({"minimum_severity": "warning"})
+
+            self.assertIn(
+                "skill_name_folder_mismatch",
+                {finding["code"] for finding in audit["findings"]},
+            )
+
     def test_gemini_cli_has_its_own_user_target(self):
         api = self.make_api(Path("D:/unused"))
         with mock.patch("os.path.expanduser", return_value="D:/Users/example"):

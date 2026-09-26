@@ -44,6 +44,8 @@ SkillHub 适合同时使用多个 AI 编程工具、维护多个项目，或已�
 
 SkillHub 支持导入 Markdown、ZIP、标准 `SKILL.md` 文件夹和仓库集合，并在统一界面中完成浏览、搜索、分类、编辑、展示本地化、回收站恢复和本地体检。第三方 Skill 的展示信息与原始语义分开保存。
 
+新建 Skill 推荐采用 `<名称>/SKILL.md`。旧式单文件仍可使用，导入体检和技能库审计会提示其目录格式。
+
 #### 多 Skill 集合
 
 ![中文 Skill 集合管理](docs/screenshots/zh/collection-manager.png)

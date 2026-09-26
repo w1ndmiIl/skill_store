@@ -1,5 +1,6 @@
 """Skill library query, editing, deletion, and restoration endpoints."""
 
+import json
 import os
 import re
 import shutil
@@ -15,7 +16,11 @@ from skillhub.domain.frontmatter import (
     split_markdown_frontmatter_source,
 )
 from skillhub.domain.global_targets import GLOBAL_SKILL_TARGETS, SKILL_LIBRARY_STATE_DIR
-from skillhub.domain.naming import normalize_skill_filename
+from skillhub.domain.naming import (
+    is_project_rules_document,
+    normalize_agent_skill_name,
+    normalize_skill_filename,
+)
 from skillhub.infrastructure.filesystem import (
     atomic_write_json,
     atomic_write_text,
@@ -559,23 +564,27 @@ class LibraryApiMixin:
             return {"error": str(exc)}
 
     def create_skill(self, filename):
-        """Create a new skill file with a dynamic bilingual template based on current settings."""
-        filename = normalize_skill_filename(filename, ensure_md=True)
-        if not filename:
-            return {"error": "Invalid filename"}
-        fp = safe_child_path(self.skills_dir, filename)
-        if not fp:
-            return {"error": "Invalid filename"}
-        if os.path.exists(fp):
+        """Create a portable <name>/SKILL.md package with a bilingual template."""
+        requested = normalize_skill_filename(filename)
+        if requested.lower().endswith(".md"):
+            requested = requested[:-3]
+        if not requested or is_project_rules_document(filename):
+            return {"error": "Invalid skill name"}
+        skill_name = normalize_agent_skill_name(requested, requested)
+        folder = safe_child_path(self.skills_dir, skill_name)
+        if not folder:
+            return {"error": "Invalid skill name"}
+        if os.path.exists(folder) or os.path.exists(folder + ".md"):
             return {"error": "该文件已存在" if self.language == "zh" else "This file already exists"}
 
-        title = os.path.splitext(filename)[0].replace("_", " ").replace("-", " ").strip()
+        title = requested.replace("_", " ").replace("-", " ").strip()
         if not title:
             title = "New Skill Guideline" if self.language == "en" else "新增技能指南"
 
         if self.language == "en":
             template = f"""---
-title: {title}
+name: {skill_name}
+title: {json.dumps(title, ensure_ascii=False)}
 emoji: 💡
 tags: Rules, Basic
 description: Define the purpose, usage triggers, and development constraints for {title}.
@@ -591,7 +600,8 @@ Write down the specific development guidelines, design principles, and quality r
 """
         else:
             template = f"""---
-title: {title}
+name: {skill_name}
+title: {json.dumps(title, ensure_ascii=False)}
 emoji: 💡
 tags: 规范, 基础
 description: 定义“{title}”的适用场景、触发条件与开发约束。
@@ -607,9 +617,9 @@ description: 定义“{title}”的适用场景、触发条件与开发约束。
 """
         try:
             os.makedirs(self.skills_dir, exist_ok=True)
-            with open(fp, "w", encoding="utf-8") as f:
-                f.write(template)
-            self._register_library_entry(filename, source="created")
-            return {"ok": True, "filename": filename}
+            os.mkdir(folder)
+            atomic_write_text(os.path.join(folder, "SKILL.md"), template)
+            self._register_library_entry(skill_name, source="created")
+            return {"ok": True, "filename": skill_name}
         except Exception as e:
             return {"error": str(e)}

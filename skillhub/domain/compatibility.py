@@ -36,12 +36,22 @@ def inspect_agent_skill_compatibility(
     content: str,
     entry_name: str,
     package_bytes: int = 0,
+    *,
+    layout: str = "standard",
 ) -> dict:
     """Return deterministic per-client compatibility without mutating the Skill."""
     raw_frontmatter, _body, has_frontmatter = split_markdown_frontmatter_source(
         content
     )
     findings = []
+    if layout == "markdown":
+        findings.append({
+            "severity": "warning",
+            "code": "nonstandard_skill_layout",
+            "path": entry_name,
+            "message_en": "A portable Skill uses <name>/SKILL.md; this single Markdown file remains usable through SkillHub compatibility support.",
+            "message_zh": "可移植 Skill 应采用 <名称>/SKILL.md；此单文件仍可通过 SkillHub 兼容支持使用。",
+        })
     parsed = {}
     if not has_frontmatter:
         findings.append({
@@ -84,6 +94,14 @@ def inspect_agent_skill_compatibility(
         and "<" not in description
         and ">" not in description
     )
+    if layout == "standard" and name and name != entry_name:
+        findings.append({
+            "severity": "warning",
+            "code": "skill_name_folder_mismatch",
+            "path": "SKILL.md",
+            "message_en": f"Skill name '{name}' does not match its folder '{entry_name}'. Check internal references before renaming either one.",
+            "message_zh": f"Skill 名称“{name}”与文件夹“{entry_name}”不一致；改名之前请检查包内引用。",
+        })
     top_level_keys = set(parsed) if isinstance(parsed, dict) else set()
 
     targets = {

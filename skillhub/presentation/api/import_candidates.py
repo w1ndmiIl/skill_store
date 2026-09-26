@@ -95,6 +95,7 @@ class ImportCandidatesApiMixin:
             content,
             entry_name,
             package_bytes,
+            layout=kind,
         )
 
     def _ai_optimize_import_entry(
