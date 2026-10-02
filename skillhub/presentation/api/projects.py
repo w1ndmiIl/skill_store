@@ -6,6 +6,7 @@ import webview
 from skillhub.domain.catalog import parse_markdown_metadata
 from skillhub.domain.naming import normalize_relative_path
 from skillhub.infrastructure.filesystem import (
+    FileHashCache,
     get_file_md5,
     load_json_file,
     safe_real_child_path,
@@ -41,7 +42,9 @@ class ProjectsApiMixin:
         if not projects:
             return []
         result = []
-        md5_cache = {}
+        md5_cache = getattr(self, "_project_status_hash_cache", None)
+        if md5_cache is None:
+            md5_cache = self._project_status_hash_cache = FileHashCache()
         global_skills = self._collect_skills(include_global_state=False)
         dir_skills = [skill for skill in global_skills if skill.get("is_dir", False)]
         file_skills = [skill for skill in global_skills if not skill.get("is_dir", False)]

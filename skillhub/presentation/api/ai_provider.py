@@ -1,6 +1,9 @@
 """Direct AI provider and web-search desktop endpoints."""
+from skillhub.infrastructure.ai_protocol import deepseek_options, ai_response_content
+
 
 import time
+from urllib.parse import urlparse
 
 import requests
 from ddgs import DDGS
@@ -9,26 +12,35 @@ from ddgs import DDGS
 class AiProviderApiMixin:
     """Expose configured AI provider operations."""
 
-    def ai_test_connection(self):
+    def ai_test_connection(self, settings=None):
         """Test API connectivity with a minimal request."""
-        if not self.deepseek_api_key:
+        settings = settings or {}
+        if not isinstance(settings, dict):
+            return {"error": "Invalid AI settings"}
+        key = settings.get("api_key") or self.deepseek_api_key
+        model = settings.get("model") or self.deepseek_model
+        base = settings.get("api_base") or self.api_base
+        if not all(isinstance(v, str) for v in (key, model, base)) or not base.startswith(("https://", "http://")):
+            return {"error": "Invalid AI settings"}
+        if not key:
             return {"error": "请先配置 API Key" if self.language == "zh" else "Please configure API Key first"}
 
         start = time.time()
         try:
-            url = self.api_base.strip()
+            url = base.strip()
             if not url.endswith("/chat/completions"):
                 url = url.rstrip("/") + "/chat/completions"
             resp = requests.post(
                 url,
                 headers={
-                    "Authorization": f"Bearer {self.deepseek_api_key}",
+                    "Authorization": f"Bearer {key}",
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": self.deepseek_model,
+                    "model": model,
                     "messages": [{"role": "user", "content": "Hi"}],
-                    "max_tokens": 80,
+                    "max_tokens": 256,
+                    **({"thinking": {"type": "disabled"}} if urlparse(url).hostname == "api.deepseek.com" else {}),
                     "tools": [{"type": "function", "function": {"name": "connection_probe", "description": "Check tool support", "parameters": {"type": "object", "properties": {}}}}],
                     "tool_choice": {"type": "function", "function": {"name": "connection_probe"}}
                 },
@@ -40,7 +52,7 @@ class AiProviderApiMixin:
                 supported = any(c.get("function", {}).get("name") == "connection_probe" for c in calls)
                 return {"ok": supported, "connected": True, "tool_calling": supported,
                         "error": "" if supported else "接口已连接，但未返回工具调用 / Connected, but tool calling was not verified",
-                        "model": self.deepseek_model, "latency_ms": elapsed}
+                        "model": resp.json().get("model", model), "latency_ms": elapsed}
             else:
                 try:
                     err = resp.json().get("error", {}).get("message", f"HTTP {resp.status_code}")
@@ -125,7 +137,7 @@ description: <一句话描述>
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": self.deepseek_model,
+                    "model": self.deepseek_model, **deepseek_options(self.api_base, getattr(self, "ai_reasoning_effort", "high")),
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         *messages
@@ -139,7 +151,7 @@ description: <一句话描述>
                 err = resp.json().get("error", {}).get("message", f"HTTP {resp.status_code}")
                 return {"error": err}
 
-            reply = resp.json()["choices"][0]["message"]["content"]
+            reply = ai_response_content(resp.json())
 
             if mode == "generate":
                 parsed = self._parse_ai_skill(reply)

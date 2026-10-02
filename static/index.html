@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SkillHub</title>
   <link rel="icon" type="image/png" href="app-icon.png">
-  <link rel="stylesheet" href="index.css?v=3.5.1-session-context">
+  <link rel="stylesheet" href="index.css?v=3.6.2-workspace">
   <script src="lucide.min.js"></script>
   <script src="marked.min.js"></script>
   <link rel="stylesheet" href="workspace-tools.css">
+  <link rel="stylesheet" href="agent-workspace.css">
 </head>
 <body>
   <div class="app-container">
@@ -217,11 +218,14 @@
         </div>
       </div>
       <div id="skill-metadata-bar" class="skill-metadata-bar">
-        <label id="skill-category-label" for="skill-category-select">分类</label>
+        <label id="skill-category-label" for="skill-category-trigger">分类</label>
         <div class="skill-category-picker">
           <div class="skill-category-control">
             <i data-lucide="tag" aria-hidden="true"></i>
-            <select id="skill-category-select" class="skill-category-select"></select>
+            <select id="skill-category-select" class="skill-category-select" hidden tabindex="-1" aria-hidden="true"></select>
+            <button id="skill-category-trigger" type="button" class="skill-category-trigger" aria-labelledby="skill-category-label skill-category-current" aria-haspopup="listbox" aria-expanded="false" aria-controls="skill-category-popup">
+              <i data-lucide="tag" aria-hidden="true"></i><span id="skill-category-current">未分类</span><i data-lucide="chevron-down" aria-hidden="true"></i>
+            </button>
           </div>
           <button type="button" class="btn btn-secondary skill-category-add" onclick="handleAddSkillCategory()">
             <i data-lucide="plus" aria-hidden="true"></i>
@@ -594,15 +598,25 @@
             <div class="settings-field vertical">
               <div class="settings-field-label">
                 <label id="settings-label-aimodel" for="settings-aimodel">AI 模型</label>
-                <span class="settings-field-desc" id="settings-desc-aimodel">输入模型名，如 deepseek-chat、deepseek-reasoner</span>
+                <span class="settings-field-desc" id="settings-desc-aimodel">输入模型名，如 deepseek-flash、deepseek-v4-pro</span>
               </div>
               <div class="settings-field-control">
-                <input type="text" id="settings-aimodel" class="settings-input" placeholder="deepseek-chat">
+                <input type="text" id="settings-aimodel" class="settings-input" placeholder="deepseek-flash">
                 <button class="btn btn-ai-primary settings-test-btn" onclick="handleAITestConnection()" id="btn-test-connection">
                   <i data-lucide="zap" style="width:13px;height:13px;"></i> 测试连接
                 </button>
               </div>
               <div id="test-result" style="display:none; font-size:0.72rem; padding:0.35rem 0.6rem; border-radius:var(--radius-sm);"></div>
+            </div>
+            <div class="settings-field vertical">
+              <div class="settings-field-label">
+                <label id="settings-label-reasoning" for="settings-reasoning-effort">DeepSeek 思考强度 / Reasoning effort</label>
+                <span id="settings-desc-reasoning" class="settings-field-desc">适用于 DeepSeek 官方接口 / For the official DeepSeek API</span>
+              </div>
+              <select id="settings-reasoning-effort" class="settings-select">
+                <option value="none">关闭 / Off</option><option value="low">低 / Low</option>
+                <option value="high">高 / High</option><option value="max">最高 / Max</option>
+              </select>
             </div>
           </div>
         </div>
@@ -630,9 +644,12 @@
             <i data-lucide="plus"></i>
           </button>
         </div>
+        <div class="ai-session-search-wrap"><input id="session-search" type="search" placeholder="搜索标题或摘要…" aria-label="搜索标题或摘要" oninput="renderSessionList()"></div>
         <div class="ai-session-list" id="ai-session-list"></div>
+        <div class="ai-session-footer" id="ai-session-count">0 个会话</div>
       </div>
 
+      <button type="button" class="ai-session-backdrop" onclick="toggleAgentSessionPanel(false)" aria-label="关闭会话列表"></button>
       <!-- Chat Area -->
       <div class="ai-chat-shell">
         <header class="modal-header ai-modal-header">
@@ -641,6 +658,7 @@
             <h3 class="modal-title" id="ai-modal-title">SkillOps Agent</h3>
           </div>
           <div class="ai-header-actions">
+            <button class="btn btn-secondary ai-header-button" id="agent-history-toggle" onclick="toggleAgentSessionPanel()" title="会话列表" aria-label="会话列表"><i data-lucide="panel-left"></i></button>
             <button class="btn btn-secondary ai-header-button" id="ai-copy-conversation" onclick="copyCurrentAgentConversation()" title="复制当前对话" aria-label="复制当前对话">
               <i data-lucide="copy"></i><span>复制对话</span>
             </button>
@@ -653,6 +671,14 @@
           </div>
         </header>
 
+        <section class="conversation-overview" aria-label="当前会话">
+          <div class="conversation-heading-row"><h4 id="agent-session-heading">新会话</h4><button type="button" id="agent-session-rename" class="conversation-rename" onclick="renameCurrentAgentSession()" title="重命名会话" aria-label="重命名会话"><i data-lucide="pencil"></i></button></div>
+          <div class="conversation-meta"><span id="agent-session-meta">开始一个新的 Skill 任务</span><span id="agent-session-status" class="conversation-status" hidden></span></div>
+          <details class="conversation-summary" id="agent-conversation-summary" open>
+            <summary><span id="agent-summary-label">对话摘要</span><button id="agent-summary-generate" type="button" class="conversation-summary-action" onclick="event.preventDefault();summarizeCurrentAgentSession()">生成 AI 摘要</button></summary>
+            <p id="agent-summary-content">开始对话后，会自动整理需求与最新进展。</p>
+          </details>
+        </section>
         <!-- Chat Messages -->
         <div class="ai-chat-messages" id="ai-chat-messages">
           <div class="ai-chat-empty">
@@ -676,6 +702,7 @@
           </div>
         </div>
 
+        <button type="button" id="agent-jump-latest" class="agent-jump-latest" onclick="scrollToAgentLatest()" hidden>回到最新消息 ↓</button>
         <!-- Skill Preview -->
         <div id="ai-skill-preview" style="display:none;border-top:1px solid var(--border);padding:0.75rem 1rem;max-height:35vh;overflow-y:auto;background:var(--bg-app);">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.6rem;">
@@ -701,6 +728,7 @@
             <textarea id="ai-chat-input" class="ai-chat-textarea" placeholder="描述 Skill 生命周期管理目标…" rows="1" onkeydown="handleChatKeydown(event)"></textarea>
             <span class="ai-chat-input-hint" id="ai-chat-input-hint">Enter 发送 · Shift+Enter 换行</span>
           </div>
+          <button type="button" id="agent-composer-stop" class="btn btn-secondary" onclick="stopAgentRun()" hidden>停止</button>
           <button class="btn btn-ai-primary ai-chat-send-button" onclick="sendAIMessage()" id="ai-send-btn" title="发送" aria-label="发送">
             <i data-lucide="send" style="width:14px;height:14px;"></i>
           </button>
@@ -709,7 +737,7 @@
       <aside class="agent-activity-panel" id="agent-activity-panel" aria-label="Agent 执行状态">
         <div class="agent-panel-header">
           <div>
-            <span class="agent-eyebrow">AGENT RUN</span>
+            <span class="agent-eyebrow" id="agent-run-eyebrow">本次任务</span>
             <strong id="agent-activity-title">执行记录</strong>
           </div>
           <span class="agent-status-badge idle" id="agent-status-badge">空闲</span>
@@ -826,9 +854,11 @@
   </div>
 
   <div id="toast-container" class="toast-container" role="status" aria-live="polite" aria-relevant="additions"></div>
+  <script src="agent-workspace.js"></script>
   <script src="session-controller.js"></script>
-  <script src="app.js?v=3.5.2-reliability"></script>
+  <script src="app.js?v=3.6.2-workspace"></script>
   <script src="workspace-tools.js"></script>
+  <script src="category-picker.js"></script>
   <script src="project-rules-editor.js"></script>
 </body>
 </html>

@@ -42,7 +42,8 @@ class ConfigurationApiMixin:
         keys = ("skills_dir", "projects", "language", "theme", "default_scan_dir",
                 "deepseek_api_key", "deepseek_model", "api_base",
                 "ai_import_optimization", "ai_display_translation", "global_skill_targets")
-        return {key: getattr(self, key) for key in keys}
+        return {**{key: getattr(self, key) for key in keys},
+                "ai_reasoning_effort": getattr(self, "ai_reasoning_effort", "high")}
 
     def _save_config(self):
         return self._config_repository().save(self._config_snapshot())
@@ -82,6 +83,7 @@ class ConfigurationApiMixin:
             "deepseek_api_key": "***" if self.deepseek_api_key else "",
             "deepseek_model": self.deepseek_model,
             "api_base": self.api_base,
+            "ai_reasoning_effort": getattr(self, "ai_reasoning_effort", "high"),
             "has_ai_key": bool(self.deepseek_api_key),
             "api_key_hint": (
                 f"••••{self.deepseek_api_key[-4:]}"
@@ -94,7 +96,7 @@ class ConfigurationApiMixin:
             "global_skill_target_options": self._global_skill_target_options(),
         }
 
-    def change_skills_dir(self):
+    def change_skills_dir(self, apply=True):
         """Open native folder picker and change the Global Skill Library path."""
         try:
             result = self._window.create_file_dialog(
@@ -106,9 +108,9 @@ class ConfigurationApiMixin:
         if not result or len(result) == 0:
             return None
         new_path = os.path.normpath(result[0])
-        return self.save_settings({"skills_dir": new_path})
+        return self.save_settings({"skills_dir": new_path}) if apply else {"skills_dir": new_path}
 
-    def pick_default_scan_dir(self):
+    def pick_default_scan_dir(self, apply=True):
         """Open native folder picker and select Default Projects starting directory."""
         try:
             result = self._window.create_file_dialog(
@@ -120,12 +122,16 @@ class ConfigurationApiMixin:
         if not result or len(result) == 0:
             return None
         new_path = os.path.normpath(result[0])
-        return self.save_settings({"default_scan_dir": new_path})
+        return self.save_settings({"default_scan_dir": new_path}) if apply else {"default_scan_dir": new_path}
 
     def save_settings(self, settings):
         if not isinstance(settings, dict):
             return {"error": "Invalid settings"}
         changes = {}
+        if "ai_reasoning_effort" in settings:
+            if settings["ai_reasoning_effort"] not in ("none", "low", "high", "max"):
+                return {"error": "Invalid reasoning effort"}
+            changes["ai_reasoning_effort"] = settings["ai_reasoning_effort"]
         for key in ("skills_dir", "default_scan_dir"):
             if key in settings:
                 if not isinstance(settings[key], str) or not os.path.isabs(settings[key]):
@@ -165,7 +171,7 @@ class ConfigurationApiMixin:
             return {"error": str(error)}
         return result if result.get("error") else self.get_config()
 
-    def save_ai_config(self, api_key, model="deepseek-chat", api_base="https://api.deepseek.com/v1", clear_key=False):
+    def save_ai_config(self, api_key, model="deepseek-flash", api_base="https://api.deepseek.com/v1", clear_key=False):
         if not all(isinstance(value, str) for value in (api_key, model, api_base)):
             return {"error": "Invalid AI settings"}
         if api_base and not api_base.startswith(("https://", "http://")):

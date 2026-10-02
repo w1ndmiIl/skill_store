@@ -213,3 +213,81 @@ test('successful refresh replaces data and emits success', async () => {
   assert.equal(h.context.skills[0].filename, 'new');
   assert.deepEqual(h.notices, [{ message: 'refreshed', type: 'success' }]);
 });
+
+test('late skill and project refreshes cannot replace newer state or show stale errors', async () => {
+  for (const kind of ['skills', 'projects']) {
+    const first = deferred(), second = deferred(); let calls = 0;
+    const api = {[kind === 'skills' ? 'get_skills' : 'get_projects']: () => (++calls === 1 ? first.promise : second.promise)};
+    const h = refreshHarness(api);
+    const refresh = kind === 'skills' ? h.context.fetchSkills : h.context.fetchProjects;
+    const a = refresh(), b = refresh();
+    second.resolve(kind === 'skills' ? [{filename: 'new'}] : [{path: 'new'}]); await b;
+    first.resolve(kind === 'skills' ? [{filename: 'old'}] : [{path: 'old'}]);
+    assert.equal(await a, false);
+    assert.equal(h.context[kind][0][kind === 'skills' ? 'filename' : 'path'], 'new');
+    const old = deferred(); calls = 0;
+    api[kind === 'skills' ? 'get_skills' : 'get_projects'] = () => (++calls === 1 ? old.promise : Promise.resolve([]));
+    const c = refresh(), d = refresh(); await d;
+    old.reject(new Error('stale failure')); await c;
+    assert.equal(h.notices.length, 0);
+  }
+});
+
+test('changing library identity invalidates an old list request', async () => {
+  const request = deferred();
+  const h = refreshHarness({get_skills: () => request.promise});
+  h.context.skillsDirPath = {textContent: 'A'};
+  const load = h.context.fetchSkills();
+  h.context.skillsDirPath.textContent = 'B';
+  request.resolve([{filename: 'from-A'}]);
+  assert.equal(await load, false);
+  assert.equal(h.context.skills[0].filename, 'old');
+});
+
+test('single-project refresh keeps unrelated project identity', async () => {
+  const untouched = {path: 'other'};
+  const h = refreshHarness({async get_project(path) {return {path, managed_skills: ['demo']};}});
+  h.context.projects = [{path: 'project'}, untouched];
+  assert.equal(await h.context.fetchProjects({projectPath: 'project'}), true);
+  assert.equal(h.context.projects[1], untouched);
+  assert.equal(h.context.projects[0].managed_skills[0], 'demo');
+});
+
+test('settings directory pickers stage choices and cancellation leaves backend library unchanged', async () => {
+  const flags = [];
+  const h = harness({
+    settingsSkillsDir: {value: 'A'}, settingsScanDir: {value: 'old-scan'}, settingsModal: {},
+    locales: {en: {toastPathUpdate: 'path'}}, deactivateModal() {},
+    window: {pywebview: {api: {
+      async change_skills_dir(apply) {flags.push(apply); return {skills_dir: 'B'};},
+      async pick_default_scan_dir(apply) {flags.push(apply); return {default_scan_dir: 'new-scan'};},
+    }}},
+  });
+  h.load(section('function closeSettingsModal()', 'async function handleSaveSettings()'));
+  await h.context.handleSettingsPickSkillsDir();
+  await h.context.handleSettingsPickScanDir();
+  h.context.closeSettingsModal();
+  assert.deepEqual(flags, [false, false]);
+  assert.equal(h.context.settingsSkillsDir.value, 'B');
+});
+
+test('a second sync plan change never produces a success notice', async () => {
+  let calls = 0;
+  const preview = {plan_token: 'one', summary: {add: 1, adopt: 0, modify: 0, delete: 0, preserve: 0}, has_conflicts: false};
+  const h = harness({
+    locales: {en: new Proxy({}, {get: (_t, key) => key})},
+    syncBtn: {innerHTML: 'Sync', setAttribute() {}, removeAttribute() {}, classList: {contains: () => true, add() {}, remove() {}}},
+    lucide: {createIcons() {}}, buildSyncReview: p => p, showStructuredReview: async () => true,
+    queuePendingSyncSummary() {},
+    saveSyncResult() {throw new Error('Unapplied result cannot be saved');},
+    window: {pywebview: {api: {
+      async preview_sync() {return preview;},
+      async sync_skills() {calls++; return {requires_confirmation: true, error: '', preview: {...preview, plan_token: String(calls)}};},
+    }}},
+  });
+  h.load(section('async function handleSyncSkills()', 'function formatImportPreview('));
+  await h.context.handleSyncSkills();
+  assert.equal(calls, 2);
+  assert.equal(h.notices.some(n => n.type === 'success'), false);
+  assert.equal(h.notices[0].type, 'error');
+});

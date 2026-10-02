@@ -6,6 +6,9 @@ import re
 import shutil
 import time
 import uuid
+import copy
+from skillhub.infrastructure.json_store import file_lock
+from skillhub.infrastructure.transactions import capture_files, restore_files, persist_snapshot
 
 from skillhub.domain.catalog import parse_markdown_metadata
 from skillhub.domain.collections import COLLECTION_DISPLAY_LOCALIZATIONS
@@ -33,6 +36,24 @@ from skillhub.infrastructure.filesystem import (
 class LibraryApiMixin:
     """Manage the active local Skill library."""
 
+    def _library_metadata_snapshot(self):
+        return capture_files([
+            self._library_index_path(), self._skill_collections_path(),
+            self._display_localizations_path(), self._skill_import_paths()["catalog"],
+        ])
+
+    def _cached_skill_metadata(self, path):
+        stat = os.stat(path)
+        signature = (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino)
+        cache = getattr(self, "_skill_metadata_cache", {})
+        old = cache.get(path)
+        if not old or old[0] != signature:
+            if len(cache) >= 20000:
+                cache.clear()
+            cache[path] = (signature, parse_markdown_metadata(path))
+            self._skill_metadata_cache = cache
+        return copy.deepcopy(cache[path][1])
+
     def get_skills(self):
         """Return list of all global skill metadata (files and directories)."""
         return self._collect_skills(include_global_state=True)
@@ -50,10 +71,10 @@ class LibraryApiMixin:
                     skill_fp = os.path.join(fp, "SKILL.md")
                     readme_fp = os.path.join(fp, "README.md")
                     if os.path.isfile(skill_fp):
-                        meta = parse_markdown_metadata(skill_fp)
+                        meta = self._cached_skill_metadata(skill_fp)
                         meta["folder_kind"] = "standard"
                     elif os.path.exists(readme_fp):
-                        meta = parse_markdown_metadata(readme_fp)
+                        meta = self._cached_skill_metadata(readme_fp)
                         meta["folder_kind"] = "bundle"
                     else:
                         meta = {
@@ -70,7 +91,7 @@ class LibraryApiMixin:
                         meta.update(self._codex_global_skill_state(item, fp))
                     skills.append(meta)
                 elif os.path.isfile(fp) and item.lower().endswith(".md"):
-                    meta = parse_markdown_metadata(fp)
+                    meta = self._cached_skill_metadata(fp)
                     meta["is_dir"] = False
                     if include_global_state:
                         meta.update(self._codex_global_skill_state(item, fp))
@@ -88,7 +109,7 @@ class LibraryApiMixin:
                 )
                 if not source or not os.path.isfile(source):
                     continue
-                meta = parse_markdown_metadata(source)
+                meta = self._cached_skill_metadata(source)
                 meta.update({
                     "filename": virtual_id,
                     "display_filename": os.path.basename(relative_path),
@@ -383,6 +404,10 @@ class LibraryApiMixin:
         }
 
     def delete_skill(self, filename):
+        with file_lock(self.skills_dir):
+            return self._delete_skill(filename)
+
+    def _delete_skill(self, filename):
         """Move a global skill into SkillHub trash so it can be restored."""
         fp = safe_child_path(self.skills_dir, filename)
         if not fp:
@@ -391,6 +416,7 @@ class LibraryApiMixin:
         trash_item = ""
         collection_snapshot = None
         global_targets_were_enabled = []
+        snapshot = self._library_metadata_snapshot()
         try:
             if os.path.exists(fp):
                 descriptor = self._codex_global_skill_descriptor(filename, fp)
@@ -441,11 +467,11 @@ class LibraryApiMixin:
                 if not trash_root:
                     return {"error": "Invalid trash path"}
                 os.makedirs(trash_root, exist_ok=False)
+                persist_snapshot(snapshot, os.path.join(trash_root, "rollback-metadata"))
                 trash_item = safe_real_child_path(trash_root, filename)
                 if not trash_item:
                     shutil.rmtree(trash_root, ignore_errors=True)
                     return {"error": "Invalid trash item path"}
-                shutil.move(fp, trash_item)
                 atomic_write_json(os.path.join(trash_root, "metadata.json"), {
                     "version": 1,
                     "filename": filename,
@@ -454,6 +480,7 @@ class LibraryApiMixin:
                     "global_targets_were_enabled": global_targets_were_enabled,
                     "codex_global_was_enabled": "codex" in global_targets_were_enabled,
                 })
+                shutil.move(fp, trash_item)
                 self._unregister_library_entry(filename)
                 state = self._load_skill_collections()
                 changed = False
@@ -486,23 +513,31 @@ class LibraryApiMixin:
                 }
             return {"error": "文件不存在" if self.language == "zh" else "File does not exist"}
         except Exception as e:
+            rollback_errors = []
             if trash_item and os.path.exists(trash_item) and not os.path.exists(fp):
                 try:
                     shutil.move(trash_item, fp)
-                    if isinstance(collection_snapshot, dict):
-                        self._save_skill_collections(collection_snapshot)
-                    descriptor = self._codex_global_skill_descriptor(filename, fp)
-                    for target_id in global_targets_were_enabled:
-                        self._set_global_skill_target(
-                            filename, True, target_id, fp, descriptor
-                        )
-                except OSError:
-                    pass
-            if trash_root:
+                except OSError as error:
+                    rollback_errors.append(str(error))
+            rollback_errors.extend(restore_files(snapshot))
+            if os.path.exists(fp):
+                descriptor = self._codex_global_skill_descriptor(filename, fp)
+                for target_id in global_targets_were_enabled:
+                    restored = self._set_global_skill_target(filename, True, target_id, fp, descriptor)
+                    if restored.get("error"):
+                        rollback_errors.append(restored["error"])
+            retained = bool(trash_item and os.path.exists(trash_item))
+            if trash_root and not retained and not rollback_errors:
                 shutil.rmtree(trash_root, ignore_errors=True)
-            return {"error": str(e)}
+            return {"error": str(e), "rolled_back": not rollback_errors,
+                    "rollback_errors": rollback_errors,
+                    "recovery_path": trash_root if retained or rollback_errors else ""}
 
     def restore_deleted_skill(self, trash_token: str):
+        with file_lock(self.skills_dir):
+            return self._restore_deleted_skill(trash_token)
+
+    def _restore_deleted_skill(self, trash_token: str):
         """Restore one skill and its collection metadata from SkillHub trash."""
         if not re.fullmatch(r"[0-9a-f]{32}", trash_token or ""):
             return {"error": "Invalid trash token"}
@@ -520,7 +555,9 @@ class LibraryApiMixin:
             return {"error": "Deleted skill metadata is invalid"}
         if os.path.exists(target):
             return {"error": "A skill with the same name already exists"}
+        snapshot = self._library_metadata_snapshot()
         try:
+            persist_snapshot(snapshot, os.path.join(trash_root, "restore-metadata"))
             shutil.move(source, target)
             collections = metadata.get("collections")
             if isinstance(collections, dict):
@@ -556,12 +593,15 @@ class LibraryApiMixin:
             shutil.rmtree(trash_root, ignore_errors=True)
             return {"ok": True, "filename": filename, "warning": warning}
         except Exception as exc:
+            rollback_errors = []
             if os.path.exists(target) and not os.path.exists(source):
                 try:
                     shutil.move(target, source)
-                except OSError:
-                    pass
-            return {"error": str(exc)}
+                except OSError as error:
+                    rollback_errors.append(str(error))
+            rollback_errors.extend(restore_files(snapshot))
+            return {"error": str(exc), "rolled_back": not rollback_errors,
+                    "rollback_errors": rollback_errors, "recovery_path": trash_root}
 
     def create_skill(self, filename):
         """Create a portable <name>/SKILL.md package with a bilingual template."""

@@ -399,6 +399,7 @@ class AgentRuntimeApiMixin:
             self.deepseek_api_key,
             self.deepseek_model,
             self.api_base,
+            reasoning_effort=getattr(self, "ai_reasoning_effort", "high"),
         )
         return AgentRuntime(
             model,

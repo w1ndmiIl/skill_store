@@ -1,4 +1,8 @@
-"""Collection discovery, localization, registry, and member state endpoints."""
+"""
+Collection discovery, localization, registry, and member state endpoints."""
+from skillhub.infrastructure.ai_protocol import deepseek_options, ai_response_content
+from skillhub.infrastructure.json_store import file_lock
+
 
 import hashlib
 import json
@@ -167,7 +171,7 @@ Return one JSON object only with string fields "title" and "description"."""
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": self.deepseek_model,
+                    "model": self.deepseek_model, **deepseek_options(self.api_base, getattr(self, "ai_reasoning_effort", "high")),
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": payload},
@@ -185,7 +189,7 @@ Return one JSON object only with string fields "title" and "description"."""
                 except Exception:
                     message = response.text or f"HTTP {response.status_code}"
                 return {"error": message}
-            raw = response.json()["choices"][0]["message"]["content"].strip()
+            raw = ai_response_content(response.json()).strip()
             fence = re.fullmatch(
                 r"```(?:json)?\s*(.*?)\s*```",
                 raw,
@@ -265,7 +269,11 @@ Return one JSON object only with string fields "title" and "description"."""
             return collection_id
         return ""
 
-    def _load_skill_collections(self) -> dict:
+    def _load_skill_collections(self):
+        with file_lock(self.skills_dir):
+            return self._load_skill_collections_locked()
+
+    def _load_skill_collections_locked(self) -> dict:
         """Load collection state and recover records from older import catalogs."""
         path = self._skill_collections_path()
         state = load_json_file(path, {"version": 1, "collections": []})
@@ -463,7 +471,11 @@ Return one JSON object only with string fields "title" and "description"."""
         self._save_skill_collections(state)
         return record
 
-    def set_collection_category(
+    def set_collection_category(self, collection_id: str, category: str):
+        with file_lock(self.skills_dir):
+            return self.set_collection_category_locked(collection_id, category)
+
+    def set_collection_category_locked(
         self,
         collection_id: str,
         category: str,
@@ -502,7 +514,11 @@ Return one JSON object only with string fields "title" and "description"."""
             "changed": category != previous,
         }
 
-    def set_collection_member_enabled(
+    def set_collection_member_enabled(self, collection_id: str, filename: str, enabled: bool):
+        with file_lock(self.skills_dir):
+            return self.set_collection_member_enabled_locked(collection_id, filename, enabled)
+
+    def set_collection_member_enabled_locked(
         self,
         collection_id: str,
         filename: str,
@@ -575,7 +591,11 @@ Return one JSON object only with string fields "title" and "description"."""
                 continue
         return entries
 
-    def _register_library_entry(self, name: str, source="managed", content_hash=None) -> None:
+    def _register_library_entry(self, name: str, source="managed", content_hash=None):
+        with file_lock(self.skills_dir):
+            return self._register_library_entry_locked(name, source, content_hash)
+
+    def _register_library_entry_locked(self, name: str, source="managed", content_hash=None) -> None:
         path = safe_real_child_path(self.skills_dir, name)
         if not path or not os.path.exists(path):
             return
@@ -595,7 +615,11 @@ Return one JSON object only with string fields "title" and "description"."""
         }
         atomic_write_json(index_path, index)
 
-    def _unregister_library_entry(self, name: str) -> None:
+    def _unregister_library_entry(self, name: str):
+        with file_lock(self.skills_dir):
+            return self._unregister_library_entry_locked(name)
+
+    def _unregister_library_entry_locked(self, name: str) -> None:
         index_path = self._library_index_path()
         index = load_json_file(index_path, {})
         if not isinstance(index, dict) or not isinstance(index.get("entries"), dict):

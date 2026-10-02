@@ -14,6 +14,7 @@ import re
 import tempfile
 import time
 import uuid
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -357,12 +358,18 @@ class OpenAICompatibleModel:
         *,
         timeout: int = 90,
         request_post: Callable[..., Any] | None = None,
+        reasoning_effort: str = "high",
+        retry_delay: Callable[[float], Any] | None = None,
     ):
         self.api_key = api_key
         self.model = model
         self.api_base = api_base
         self.timeout = timeout
         self.request_post = request_post or requests.post
+        self.reasoning_effort = reasoning_effort
+        self.retry_delay = retry_delay or time.sleep
+        self.cancel_requested = lambda: False
+        self.last_response_metadata = {}
 
     def complete(
         self,
@@ -372,22 +379,43 @@ class OpenAICompatibleModel:
         url = self.api_base.strip()
         if not url.endswith("/chat/completions"):
             url = url.rstrip("/") + "/chat/completions"
-        response = self.request_post(
-            url,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": self.model,
-                "messages": messages,
-                "tools": tools,
-                "tool_choice": "auto",
-                "temperature": 0.2,
-                "max_tokens": 4096,
-            },
-            timeout=self.timeout,
-        )
+        payload = {
+            "model": self.model, "messages": messages, "tools": tools,
+            "tool_choice": "auto", "temperature": 0.2, "max_tokens": 8192,
+        }
+        if urlparse(url).hostname == "api.deepseek.com":
+            payload["thinking"] = {"type": "disabled" if self.reasoning_effort == "none" else "enabled"}
+            if self.reasoning_effort != "none":
+                payload["reasoning_effort"] = self.reasoning_effort
+                payload.pop("temperature")
+                payload["messages"] = [dict(m, reasoning_content=m.get("reasoning_content", ""))
+                                       if m.get("role") == "assistant" else m for m in messages]
+        if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > 512000:
+            raise ModelCallError("完整模型请求超过本地上下文预算，请缩小任务范围 / Full request exceeds the local context budget")
+        response = None
+        for attempt in range(3):
+            if self.cancel_requested():
+                raise ModelCallError("Model request cancelled")
+            try:
+                response = self.request_post(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                    timeout=self.timeout,
+                )
+            except requests.exceptions.ConnectionError:
+                if attempt == 2:
+                    raise
+                response = None
+            if response is not None and (response.status_code not in (429, 500, 502, 503, 504) or attempt == 2):
+                break
+            for _ in range(10 * (attempt + 1)):
+                if self.cancel_requested():
+                    raise ModelCallError("Model request cancelled")
+                self.retry_delay(0.1)
         if response.status_code != 200:
             try:
                 body = response.json()
@@ -405,12 +433,19 @@ class OpenAICompatibleModel:
                 )
             raise ModelCallError(message or f"HTTP {response.status_code}")
         try:
-            message = response.json()["choices"][0]["message"]
+            body = response.json()
+            choice = body["choices"][0]
+            message = choice["message"]
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise ModelCallError("模型返回格式无效，缺少 choices[0].message") from exc
         if not isinstance(message, dict):
             raise ModelCallError("模型返回的 message 不是对象")
-        return message
+        self.last_response_metadata = {
+            "model": body.get("model", self.model), "finish_reason": choice.get("finish_reason", ""),
+            "usage": {k: v for k, v in (body.get("usage") or {}).items()
+                      if k in ("prompt_tokens", "completion_tokens", "total_tokens") and isinstance(v, int)},
+        }
+        return {**message, "_finish_reason": choice.get("finish_reason", "")}
 
 
 def _is_type(value: Any, expected: str) -> bool:
@@ -733,6 +768,8 @@ class RunRecorder:
             "error_type": task.get("error_type", ""),
             "memory_ids": task.get("memory_ids", []),
             "step_count": task.get("step_count", 0),
+            "model": task.get("model", ""),
+            "usage": task.get("usage", {}),
         }
         os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
         with open(self.path, "a", encoding="utf-8") as handle:
@@ -1332,6 +1369,8 @@ class AgentRuntime:
             task["updated_at"] = utc_now()
             self.task_store.save(task)
             try:
+                if isinstance(self.model, OpenAICompatibleModel):
+                    self.model.cancel_requested = getattr(self, "cancel_requested", lambda: False)
                 message = self.model.complete(
                     task["messages"],
                     [tool.schema() for tool in self.tools.values()],
@@ -1343,12 +1382,27 @@ class AgentRuntime:
                     return self._public(task)
                 return self._fail(task, "Timeout", "Agent 模型请求超时")
             except Exception as exc:
+                if self._cancelled(task):
+                    return self._public(task)
                 return self._fail(task, type(exc).__name__, str(exc))
+
+            metadata = getattr(self.model, "last_response_metadata", {})
+            task["model"] = metadata.get("model", task.get("model", ""))
+            usage = task.setdefault("usage", {})
+            for key, value in metadata.get("usage", {}).items():
+                usage[key] = usage.get(key, 0) + value
+            if message.get("_finish_reason") == "length":
+                return self._fail(task, "OutputTruncated", "模型输出已截断，任务尚未完成。请缩小范围后重试 / Model output was truncated; task is incomplete")
+            if message.get("_finish_reason") in ("content_filter", "insufficient_system_resource"):
+                return self._fail(task, "InvalidModelResponse", "模型未正常完成响应 / Model response did not complete")
 
             assistant = {
                 "role": "assistant",
                 "content": sanitize(message.get("content") or "", max_string=8000),
             }
+            if isinstance(message.get("reasoning_content"), str):
+                # Private protocol state; never included in the public task or run log.
+                assistant["reasoning_content"] = message["reasoning_content"]
             if self._cancelled(task):
                 return self._public(task)
             raw_calls = message.get("tool_calls") or []
@@ -1376,6 +1430,8 @@ class AgentRuntime:
             task["step_count"] += 1
 
             if not calls:
+                if not str(message.get("content") or "").strip():
+                    return self._fail(task, "EmptyModelResponse", "模型未返回有效回答，任务尚未完成 / Model returned no answer")
                 if self._requires_write_followup(task):
                     followup = task["required_write_followup"]
                     correction_count = int(
@@ -1762,4 +1818,6 @@ class AgentRuntime:
             "final_answer": task.get("final_answer", ""),
             "memory_used": task.get("memory_used", []),
             "error_type": task.get("error_type", ""),
+            "model": task.get("model", ""),
+            "usage": task.get("usage", {}),
         }

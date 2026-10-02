@@ -54,7 +54,7 @@ class BackgroundAgentApiMixin:
                 return
             messages = session["messages"]
             if not any(m.get("run_id") == result["run_id"] for m in messages):
-                messages.append({"role": "assistant", "content": result["final_answer"], "run_id": result["run_id"]})
+                messages.append({"role": "assistant", "content": result["final_answer"], "run_id": result["run_id"], "run_status": result.get("status", "completed")})
                 saved = service.save_session(session["id"], session.get("title", ""), messages)
                 if saved.get("error"):
                     raise OSError(saved["error"])

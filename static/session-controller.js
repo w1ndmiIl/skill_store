@@ -35,13 +35,16 @@ async function saveCurrentSession() {
   const sid = currentSessionId;
   if (!sid || aiChatHistory.length === 0) return true;
   const messages = aiChatHistory.map(m=>({...m}));
-  const title = messages.find(m=>m.role==='user')?.content?.slice(0,30) || uiText('新会话','New Chat');
+  const title = ''; // Backend derives an overview while preserving custom titles.
   try {
     const r = await window.pywebview.api.chat_save_session(sid,title,messages);
     if (r?.error) throw new Error(r.error);
     const existing = allSessions.find(s=>s.id===sid);
-    if (existing) Object.assign(existing,{title,msg_count:messages.length});
-    else allSessions.unshift({id:sid,title,msg_count:messages.length});
+    const metadata=r.metadata||{id:sid,title:messages.find(m=>m.role==='user')?.content?.slice(0,30)||uiText('新会话','New Chat'),msg_count:messages.length};
+    if (existing) Object.assign(existing,metadata);
+    else allSessions.unshift(metadata);
+    renderSessionList();
+    if(sid===currentSessionId && typeof renderAgentSessionOverview==='function')renderAgentSessionOverview();
     return true;
   } catch(e) { showToast(uiText('会话保存失败：','Chat save failed: ')+e.message,'error'); return false; }
 }
@@ -64,18 +67,39 @@ async function loadSessionList(selectSession=false) {
     document.getElementById('recover-chat-button').hidden=false;
   }
 }
+let sessionListLimit = 60;
 function renderSessionList() {
+  const scroll=aiSessionList.scrollTop||0;
   aiSessionList.replaceChildren();
-  const query = (document.getElementById('session-search')?.value || '').toLowerCase();
-  for (const s of allSessions.filter(s=>(s.title||'').toLowerCase().includes(query))) {
-    const row = document.createElement('div'); row.className='ai-session-item'+(s.id===currentSessionId?' active':'');
-    const open = document.createElement('button');open.className='session-open';
-    open.textContent=(unreadSessions.has(s.id)?'● ':'')+(s.title||uiText('新会话','New Chat'));
-    open.onclick=()=>switchToSession(s.id);
-    const del=document.createElement('button');del.className='ai-session-del';del.textContent='×';
-    del.setAttribute('aria-label',uiText('删除会话','Delete chat'));del.onclick=()=>deleteSession(s.id);
+  const query=(document.getElementById('session-search')?.value||'').trim().toLocaleLowerCase();
+  const filtered=allSessions.filter(s=>[s.title,s.summary,s.preview].filter(Boolean).join(' ').toLocaleLowerCase().includes(query));
+  filtered.sort((a,b)=>(Date.parse(b.updated_at||b.created_at||'')||0)-(Date.parse(a.updated_at||a.created_at||'')||0));
+  let group='';
+  for(const s of filtered.slice(0,sessionListLimit)) {
+    const label=typeof sessionCalendarGroup==='function'?sessionCalendarGroup(s):'';
+    if(label && label!==group){const heading=document.createElement('div');heading.className='session-group-label';heading.textContent=label;aiSessionList.append(heading);group=label;}
+    const row=document.createElement('div');row.className='ai-session-item'+(s.id===currentSessionId?' active':'');
+    const open=document.createElement('button');open.type='button';open.className='session-open';
+    const title=typeof sessionDisplayTitle==='function'?sessionDisplayTitle(s):(s.title||uiText('新会话','New Chat'));
+    open.title=title;open.setAttribute('aria-label',title);if(s.id===currentSessionId)open.setAttribute('aria-current','true');
+    const name=document.createElement('span');name.className='ai-session-item-title';name.textContent=title;
+    if(unreadSessions.has(s.id)){const dot=document.createElement('span');dot.className='session-unread';dot.setAttribute('aria-label',uiText('未读','Unread'));name.prepend?.(dot);}
+    const preview=document.createElement('span');preview.className='ai-session-item-preview';preview.textContent=s.summary||s.preview||uiText('开始新的 Skill 任务','Start a new Skill task');
+    const meta=document.createElement('span');meta.className='ai-session-item-meta';
+    const count=document.createElement('span');count.textContent=(s.msg_count||0)+' '+uiText('条消息','messages');meta.append(count);
+    const status=typeof sessionLiveStatus==='function'?sessionLiveStatus(s):'';
+    if(status){const badge=document.createElement('span');badge.className='conversation-status '+status;badge.textContent=typeof agentStatusLabel==='function'?agentStatusLabel(status):status;meta.append(badge);}
+    const time=document.createElement('span');time.className='session-item-time';time.textContent=typeof sessionShortTime==='function'?sessionShortTime(s):'';meta.append(time);
+    open.append(name,preview,meta);open.onclick=()=>switchToSession(s.id);
+    const del=document.createElement('button');del.type='button';del.className='ai-session-del';del.textContent='×';
+    del.setAttribute('aria-label',uiText('删除会话','Delete chat')+': '+title);del.onclick=()=>deleteSession(s.id);
     row.append(open,del);aiSessionList.append(row);
   }
+  if(!filtered.length){const empty=document.createElement('div');empty.className='session-search-empty';empty.textContent=query?uiText('没有匹配的会话','No matching conversations'):uiText('新建会话，开始整理 Skill。','Start a conversation to work on Skills.');aiSessionList.append(empty);}
+  if(filtered.length>sessionListLimit){const more=document.createElement('button');more.className='session-more';more.textContent=uiText('显示更多会话','Show more conversations');more.onclick=()=>{sessionListLimit+=60;renderSessionList();};aiSessionList.append(more);}
+  const total=document.getElementById('ai-session-count');if(total)total.textContent=filtered.length+' '+uiText('个会话','conversations');
+  aiSessionList.scrollTop=scroll;
+  if(typeof renderAgentSessionOverview==='function')renderAgentSessionOverview();
 }
 async function switchToSession(sid,saveBeforeSwitch=true) {
   const request=++sessionRequestId;
@@ -88,6 +112,8 @@ async function switchToSession(sid,saveBeforeSwitch=true) {
     if(request!==sessionRequestId) return;
     if(r.error) throw new Error(r.error);
     currentSessionId=sid;aiChatHistory=r.session.messages;
+    if(r.metadata){const item=allSessions.find(s=>s.id===sid);if(item)Object.assign(item,r.metadata);else allSessions.unshift(r.metadata);}
+    if(typeof toggleAgentSessionPanel==='function')toggleAgentSessionPanel(false);
     aiSkillPreview.style.display='none';aiGeneratedSkill=null;
     unreadSessions.delete(sid); aiIsLoading=false;
     renderSessionList();renderChatHistory();await loadAgentRunForSession();
@@ -103,7 +129,8 @@ async function createNewSession(saveBeforeCreate=true) {
   currentSessionId='s_'+crypto.randomUUID();aiChatHistory=[];
   aiSkillPreview.style.display='none';aiGeneratedSkill=null;aiIsLoading=false;
   currentAgentRunId=null;currentAgentApprovalId=null;
-  allSessions.unshift({id:currentSessionId,title:uiText('新会话','New Chat'),msg_count:0});
+  const now=new Date().toISOString();
+  allSessions.unshift({id:currentSessionId,title:uiText('新会话','New Chat'),msg_count:0,created_at:now,updated_at:now});
   renderSessionList();renderChatHistory();resetAgentRunPanel();updateAgentProgressControls();
   } finally { if(request===sessionRequestId)setSessionTransition(false); }
 }
@@ -136,7 +163,11 @@ async function loadAgentRunForSession(){
 }
 function updateAgentProgressControls(){
   const job=activeAgentJobs.get(currentAgentRunId);
-  aiIsLoading=Boolean(job);aiSendBtn.disabled=aiIsLoading||sessionTransition;
+  aiIsLoading=Boolean(job);const elsewhere=[...activeAgentJobs.values()].some(j=>j.sid!==currentSessionId&&!j.finishing);
+  aiSendBtn.disabled=aiIsLoading||sessionTransition||elsewhere;
+  const composer=document.getElementById('agent-composer-stop');if(composer){composer.hidden=!job;composer.disabled=Boolean(job?.stopping);composer.textContent=job?.stopping?uiText('正在停止…','Stopping…'):uiText('停止','Stop');}
+  const hint=document.getElementById('ai-chat-input-hint');if(hint)hint.textContent=elsewhere?uiText('另一会话正在运行，可继续编辑，完成后发送。','Another conversation is running. Compose now and send when it finishes.'):uiText('Enter 发送 · Shift+Enter 换行','Enter to send · Shift+Enter for a new line');
+  if(typeof renderAgentSessionOverview==='function')renderAgentSessionOverview();
   const button=document.getElementById('agent-stop-button');button.hidden=!job;
   button.disabled=Boolean(job?.stopping);
   button.textContent=job?.stopping?uiText('正在停止…','Stopping…'):uiText('停止','Stop');
@@ -151,7 +182,7 @@ function watchAgentRun(runId,sid){
       const r=await window.pywebview.api.agent_poll(runId);
       if(r.error||r.job_error){activeAgentJobs.delete(runId);updateAgentProgressControls();showToast(r.error||r.job_error,"error");return;}
       job.failures=0;
-      if(currentSessionId===sid){renderAgentRun(r);updateAgentProgressControls();}
+      if(currentSessionId===sid){renderAgentRun(r);const owner=allSessions.find(s=>s.id===sid);if(owner)owner.last_status=r.status;updateAgentProgressControls();}
       if(r.busy){setTimeout(poll,650);return;}
       job.finishing=true;
       if(r.final_answer){
@@ -167,6 +198,7 @@ function watchAgentRun(runId,sid){
 }
 async function sendAIMessage(){
   const text=aiChatInput.value.trim();if(!text||aiIsLoading||sessionTransition)return;
+  if([...activeAgentJobs.values()].some(j=>!j.finishing)){showToast(uiText('请等待当前任务结束，输入内容已保留。','Wait for the current task; your draft is retained.'),'info');return;}
   if(!currentSessionId)await createNewSession(false);
   ++sessionRequestId;
   const sid=currentSessionId;

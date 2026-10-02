@@ -1847,7 +1847,7 @@ body.dark-theme .skills-dir-config{background:rgba(255,255,255,.03)}
   color:var(--text-secondary);font:650 11px var(--font-sans);cursor:pointer;
 }
 .settings-section-nav button:hover,.settings-section-nav button:focus-visible{background:var(--bg-hover);color:var(--text-primary);outline:none}
-.settings-anchor-section{scroll-margin-top:12px}
+.settings-anchor-section{scroll-margin-top:12px;flex-shrink:0}
 .config-value:hover{color:var(--accent)}
 .config-value:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px}
 .btn-config svg{width:13px;height:13px}

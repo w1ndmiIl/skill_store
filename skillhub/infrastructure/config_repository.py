@@ -1,6 +1,9 @@
 """Configuration persistence and legacy migration for the desktop application."""
 
 import os
+from urllib.parse import urlparse
+
+DEFAULT_AI_MODEL = "deepseek-flash"
 
 from .filesystem import atomic_write_json, load_json_file
 from .json_store import read_json, write_json
@@ -53,6 +56,8 @@ class ConfigRepository:
             "default_scan_dir": os.path.expanduser("~"),
             "ai_import_optimization": False,
             "ai_display_translation": False,
+            "deepseek_model": DEFAULT_AI_MODEL,
+            "ai_reasoning_effort": "high",
             "global_skill_targets": list(self.default_global_targets),
         }
 
@@ -98,9 +103,17 @@ class ConfigRepository:
             "ai_import_optimization",
             "ai_display_translation",
             "global_skill_targets",
+            "deepseek_model",
+            "ai_reasoning_effort",
         ):
             if key not in config:
                 config[key] = defaults[key]
+        if (urlparse(config.get("api_base", "https://api.deepseek.com/v1")).hostname == "api.deepseek.com"
+                and config["deepseek_model"] in ("deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp")):
+            config["deepseek_model"] = DEFAULT_AI_MODEL
+            # Preserve all original fields and a validated backup on migration.
+            if os.path.exists(self.config_path):
+                write_json(self.config_path, config, valid_config)
         return config
 
     def save(self, config: dict) -> bool:

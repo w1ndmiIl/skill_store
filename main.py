@@ -196,7 +196,8 @@ class Api(
         self.theme = config.get("theme", "light")
         self.default_scan_dir = config.get("default_scan_dir", os.path.expanduser("~"))
         self.deepseek_api_key = config.get("deepseek_api_key", "")
-        self.deepseek_model = config.get("deepseek_model", "deepseek-chat")
+        self.deepseek_model = config.get("deepseek_model", "deepseek-flash")
+        self.ai_reasoning_effort = config.get("ai_reasoning_effort", "high")
         self.api_base = config.get("api_base", "https://api.deepseek.com/v1")
         self.ai_import_optimization = bool(
             config.get("ai_import_optimization", False)

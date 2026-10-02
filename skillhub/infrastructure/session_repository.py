@@ -1,6 +1,7 @@
 """Validated chat persistence; one transaction covers read, edit and write."""
 import copy
 import os
+from skillhub.domain.conversation import session_metadata
 from .json_store import file_lock, read_json, write_json, recover_json
 
 def valid_sessions(value):
@@ -10,6 +11,8 @@ def valid_sessions(value):
         and isinstance(s.get("created_at", ""), str)
         and isinstance(s.get("updated_at", ""), str)
         and isinstance(s.get("messages"), list)
+        and isinstance(s.get("summary", ""), str)
+        and isinstance(s.get("title_source", "auto"), str)
         and all(isinstance(m, dict) and m.get("role") in ("user", "assistant", "system")
                 and isinstance(m.get("content"), str) for m in s["messages"])
         for s in value) and len({s["id"] for s in value}) == len(value))
@@ -25,7 +28,7 @@ class ChatSessionRepository:
             return copy.deepcopy(self._read_cached())
     def summaries(self, language="zh"):
         with self.transaction():
-            return [{"id": s["id"], "title": s.get("title") or ("新会话" if language == "zh" else "New Chat"), "created_at": s.get("created_at", ""), "updated_at": s.get("updated_at", s.get("created_at", "")), "msg_count": len(s["messages"])} for s in sorted(self._read_cached(), key=lambda s: s.get("updated_at", s.get("created_at", "")), reverse=True)]
+            return [session_metadata(s, language) for s in sorted(self._read_cached(), key=lambda s: s.get("updated_at", s.get("created_at", "")), reverse=True)]
     def session(self, session_id):
         with self.transaction():
             return copy.deepcopy(next((s for s in self._read_cached() if s["id"] == session_id), None))

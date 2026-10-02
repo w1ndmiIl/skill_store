@@ -6,6 +6,7 @@ import os
 import shutil
 import stat
 import uuid
+import threading
 
 from skillhub.domain.naming import normalize_relative_path
 
@@ -13,6 +14,8 @@ from skillhub.domain.naming import normalize_relative_path
 def get_file_md5(file_path: str, cache: dict = None) -> str:
     if not os.path.exists(file_path) or os.path.isdir(file_path):
         return ""
+    if isinstance(cache, FileHashCache):
+        return cache.md5(file_path)
     cache_key = os.path.normcase(os.path.abspath(file_path))
     if cache is not None and cache_key in cache:
         return cache[cache_key]
@@ -24,6 +27,29 @@ def get_file_md5(file_path: str, cache: dict = None) -> str:
     if cache is not None:
         cache[cache_key] = value
     return value
+
+
+class FileHashCache:
+    """Status-query cache; writes and reviewed sync plans always hash afresh."""
+    def __init__(self):
+        self.entries = {}
+        self.lock = threading.RLock()
+
+    def md5(self, path):
+        key = os.path.normcase(os.path.abspath(path))
+        with self.lock:
+            before = os.stat(path)
+            signature = (before.st_mtime_ns, before.st_ctime_ns, before.st_size, before.st_ino)
+            old = self.entries.get(key)
+            if old and old[0] == signature:
+                return old[1]
+            digest = get_file_md5(path)
+            after = os.stat(path)
+            if signature == (after.st_mtime_ns, after.st_ctime_ns, after.st_size, after.st_ino):
+                if len(self.entries) >= 20000:
+                    self.entries.clear()
+                self.entries[key] = (signature, digest)
+            return digest
 
 
 def get_bytes_md5(data: bytes) -> str:

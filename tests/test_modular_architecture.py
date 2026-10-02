@@ -240,10 +240,10 @@ class ModularArchitectureTests(unittest.TestCase):
             language="en",
             clock=lambda: "2026-08-05T12:00:00",
         )
-        self.assertEqual(
-            service.save_session("session-1", "", [{"role": "user"}]),
-            {"ok": True, "id": "session-1"},
-        )
+        saved = service.save_session("session-1", "", [{"role": "user"}])
+        self.assertTrue(saved["ok"])
+        self.assertEqual(saved["id"], "session-1")
+        self.assertIn("summary", saved["metadata"])
         self.assertEqual(service.list_sessions()[0]["title"], "New Chat")
         self.assertEqual(
             service.load_session("session-1")["session"]["messages"],

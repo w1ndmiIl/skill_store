@@ -215,7 +215,7 @@ function refreshWorkspaceLabels(){
   for(const root of [toolModal,document.querySelector('.workspace-filters'),aiSessionList.parentElement,agentResumeButton.parentElement,document.getElementById('settings-apikey').parentElement,editorModal.querySelector('.modal-header')]){
     root?.querySelectorAll('button').forEach(b=>{const pair=workspaceTranslations.get(b.textContent);if(pair)b.textContent=pair[currentLanguage==='zh'?0:1];});
   }
-  const input=document.getElementById('session-search');if(input){input.placeholder=uiText('搜索会话','Search chats');input.setAttribute('aria-label',input.placeholder);}
+  const input=document.getElementById('session-search');if(input){input.placeholder=uiText('搜索标题或摘要…','Search titles or summaries…');input.setAttribute('aria-label',input.placeholder);}
 }
 function initWorkspaceTools(){
   const toolbar=document.createElement('div');toolbar.className='workspace-filters';
@@ -231,7 +231,7 @@ function initWorkspaceTools(){
   const pageNumber=document.createElement('span');pageNumber.id='skill-page-number';pages.append(pageNumber);
   const next=toolButton('›',()=>{listPage++;renderSkillsGrid();},pages);next.id='skill-page-next';next.setAttribute('aria-label','下一页 / Next page');
   toolButton(uiText('回收站','Trash'),openTrash,libraryActions);
-  const search=document.createElement('input');search.id='session-search';search.type='search';search.placeholder=uiText('搜索会话','Search chats');search.setAttribute('aria-label',search.placeholder);search.oninput=renderSessionList;aiSessionList.before(search);
+  const search=document.createElement('input');search.id='session-search';search.type='search';search.placeholder=uiText('搜索标题或摘要…','Search titles or summaries…');search.setAttribute('aria-label',search.placeholder);search.oninput=renderSessionList;if(!document.getElementById('session-search'))aiSessionList.before(search);
   const recover=toolButton(uiText('恢复历史备份','Restore history backup'),recoverChatHistory,aiSessionList.parentElement);recover.id='recover-chat-button';recover.hidden=true;
   const elapsed=document.createElement('span');elapsed.id='agent-elapsed';elapsed.setAttribute('role','status');agentResumeButton.after(elapsed);
   const stop=toolButton(uiText('停止','Stop'),stopAgentRun,agentResumeButton.parentElement);stop.id='agent-stop-button';stop.hidden=true;

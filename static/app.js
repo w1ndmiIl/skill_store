@@ -22,7 +22,8 @@ let currentLanguage = 'zh';
 let currentTheme = 'light';
 let defaultScanDir = '';
 let deepseekApiKey = '';
-let deepseekModel = 'deepseek-chat';
+let deepseekModel = 'deepseek-flash';
+let aiReasoningEffort = 'high';
 let apiBase = 'https://api.deepseek.com/v1';
 let hasAiKey = false;
 let apiKeyHint = '';
@@ -188,6 +189,13 @@ function trapModalFocus(event, modal) {
 }
 
 document.addEventListener('keydown', event => {
+  const categoryPopup=document.getElementById('skill-category-popup');
+  if(categoryPopup && event.key==='Escape'){
+    event.preventDefault();event.stopPropagation();closeSkillCategoryPicker();return;
+  }
+  if(categoryPopup && event.key==='Tab' && categoryPopup.contains(event.target)){
+    closeSkillCategoryPicker(false);document.getElementById('skill-category-trigger').focus();
+  }
   const activeModals = Array.from(document.querySelectorAll('.modal-overlay.active'));
   const modal = activeModals.sort((a,b)=>(Number(getComputedStyle(a).zIndex)||0)-(Number(getComputedStyle(b).zIndex)||0)).at(-1);
   if (!modal) {
@@ -379,7 +387,7 @@ const locales = {
     settingsLabelApikey: 'API 密钥',
     settingsDescApikey: '用于 AI 智能编写和辅助生成技能内容',
     settingsLabelAimodel: 'AI 模型名称',
-    settingsDescAimodel: '输入你要调用的模型，如 deepseek-chat, qwen2.5:7b, gpt-4o 等',
+    settingsDescAimodel: '输入你要调用的模型，如 deepseek-flash, deepseek-v4-pro, qwen2.5:7b 等',
     btnTestConnection: '测试连接',
     exitProjectMode: '已返回技能库',
     confirmRemove: '确定要移除此项目的关联吗？\n不会删除项目中的任何文件。',
@@ -549,7 +557,7 @@ const locales = {
     settingsLabelApikey: 'API Key',
     settingsDescApikey: 'Used for AI generation and search-assisted writing',
     settingsLabelAimodel: 'AI Model Name',
-    settingsDescAimodel: 'Enter target model name, e.g. deepseek-chat, qwen2.5:7b, gpt-4o',
+    settingsDescAimodel: 'Enter target model name, e.g. deepseek-flash, deepseek-v4-pro, qwen2.5:7b',
     btnTestConnection: 'Test Link',
     exitProjectMode: 'Back to the Skill library',
     confirmRemove: 'Are you sure you want to unlink this project?\nNo files will be deleted from your disk.',
@@ -713,7 +721,8 @@ async function fetchConfig() {
     currentLanguage = config.language || 'zh';
     currentTheme = config.theme || 'light';
     defaultScanDir = config.default_scan_dir || '';
-    deepseekModel = config.deepseek_model || 'deepseek-chat';
+    deepseekModel = config.deepseek_model || 'deepseek-flash';
+    aiReasoningEffort = config.ai_reasoning_effort || 'high';
     apiBase = config.api_base || 'https://api.deepseek.com/v1';
     hasAiKey = Boolean(config.has_ai_key);
     apiKeyHint = config.api_key_hint || '';
@@ -885,6 +894,9 @@ function applyLanguage(lang) {
     : 'Sends only the Skill title and description to the configured AI. Translations are display-only and never modify SKILL.md.';
   document.getElementById('settings-label-aimodel').textContent = t.settingsLabelAimodel;
   document.getElementById('settings-desc-aimodel').textContent = t.settingsDescAimodel;
+  document.getElementById('settings-label-reasoning').textContent = lang === 'zh' ? 'DeepSeek 思考强度' : 'DeepSeek reasoning effort';
+  document.getElementById('settings-desc-reasoning').textContent = lang === 'zh' ? '仅适用于 DeepSeek 官方接口；关闭可减少简单任务的等待。' : 'Official DeepSeek API only; Off reduces waiting on simple tasks.';
+  for (const option of document.getElementById('settings-reasoning-effort').options) option.textContent = ({none: ['关闭', 'Off'], low: ['低', 'Low'], high: ['高', 'High'], max: ['最高', 'Max']})[option.value][lang === 'zh' ? 0 : 1];
   document.getElementById('btn-test-connection').innerHTML = `<i data-lucide="zap" style="width:13px;height:13px;"></i> ${t.btnTestConnection}`;
 
   // Re-render components to apply dynamic texts
@@ -893,6 +905,7 @@ function applyLanguage(lang) {
   renderSkillsGrid();
   updateStatistics();
   updateAIConfigurationIndicators();
+  if(typeof refreshAgentWorkspaceLabels==='function')refreshAgentWorkspaceLabels();
   if (typeof updateAgentDialogControls === 'function') {
     updateAgentDialogControls();
   }
@@ -904,29 +917,42 @@ function applyLanguage(lang) {
 // ------------------------------------------
 
 async function fetchSkills({ throwOnError = false } = {}) {
+  const request = fetchSkills.requestId = (fetchSkills.requestId || 0) + 1;
+  const library = typeof skillsDirPath === 'undefined' ? '' : skillsDirPath.textContent;
   try {
     const result = await window.pywebview.api.get_skills();
+    if (request !== fetchSkills.requestId || (typeof skillsDirPath !== 'undefined' && library !== skillsDirPath.textContent)) return false;
     if (!Array.isArray(result)) throw new Error(result?.error || 'Invalid skill list');
     skills = result;
     renderCategoryFilterBar();
     renderSkillsGrid();
     return true;
   } catch (e) {
+    if (request !== fetchSkills.requestId) return false;
     if (throwOnError) throw e;
     showToast(locales[currentLanguage].toastLoadFail + e, 'error');
     return false;
   }
 }
 
-async function fetchProjects({ throwOnError = false } = {}) {
+async function fetchProjects({ throwOnError = false, projectPath = '' } = {}) {
+  const request = fetchProjects.requestId = (fetchProjects.requestId || 0) + 1;
+  const library = typeof skillsDirPath === 'undefined' ? '' : skillsDirPath.textContent;
   try {
-    const result = await window.pywebview.api.get_projects();
+    const result = projectPath ? await window.pywebview.api.get_project(projectPath) : await window.pywebview.api.get_projects();
+    if (request !== fetchProjects.requestId || (typeof skillsDirPath !== 'undefined' && library !== skillsDirPath.textContent)) return false;
+    if (projectPath) {
+      if (!result || typeof result !== 'object' || result.error || result.path !== projectPath) throw new Error(result?.error || 'Invalid project');
+      projects = projects.map(p => p.path === projectPath ? result : p);
+      renderProjectsList(); updateStatistics(); return true;
+    }
     if (!Array.isArray(result)) throw new Error(result?.error || 'Invalid project list');
     projects = result;
     renderProjectsList();
     updateStatistics();
     return true;
   } catch (e) {
+    if (request !== fetchProjects.requestId) return false;
     if (throwOnError) throw e;
     showToast(locales[currentLanguage].toastProjectFail + e, 'error');
     return false;
@@ -2700,10 +2726,11 @@ async function handleSyncSkills() {
       );
     }
     if (result.error) throw new Error(result.error);
+    if (result.ok !== true) throw new Error(currentLanguage === 'zh' ? '同步计划再次变化，尚未写入，请重新预览确认。' : 'The sync plan changed again; nothing was applied. Review again.');
     needsSyncAttention = false;
     showToast(locales[currentLanguage].toastSyncSuccess + result.synced_count + (currentLanguage === 'zh' ? ' 项技能' : ' skills'), 'success');
     await saveSyncResult(syncProjectPath, preview, result);
-    await fetchProjects();
+    await fetchProjects({ projectPath: syncProjectPath, throwOnError: true });
     refreshCurrentProject();
   } catch (e) {
     needsSyncAttention = true;
@@ -3173,14 +3200,15 @@ async function handleUndoSync() {
   undoSyncBtn.disabled = true;
   syncBtn.disabled = true;
   try {
-    const result = await window.pywebview.api.undo_last_sync(currentProjectPath);
+    const undoProjectPath = currentProjectPath;
+    const result = await window.pywebview.api.undo_last_sync(undoProjectPath);
     if (result.error) throw new Error(result.error);
     if (result.skipped_count > 0) {
       showToast(locales[currentLanguage].toastUndoPartial + result.skipped.join(', '), 'warning');
     } else {
       showToast(locales[currentLanguage].toastUndoSuccess, 'success');
     }
-    await fetchProjects();
+    await fetchProjects({ projectPath: undoProjectPath, throwOnError: true });
     refreshCurrentProject();
   } catch (e) {
     showToast(locales[currentLanguage].toastUndoFail + e, 'error');
@@ -3528,7 +3556,7 @@ async function handleAddSkillCategory() {
   const selectedCategory = getSkillCategorySelectValue(existing || normalized);
   if (selectedCategory) pendingEditorCategories.add(selectedCategory);
   populateSkillCategoryOptions(selectedCategory);
-  skillCategorySelect.focus();
+  document.getElementById('skill-category-trigger')?.focus();
 }
 
 async function handleDeleteSkillCategory() {
@@ -3805,6 +3833,7 @@ async function closeEditorModal(force = false) {
     if (!discard) return;
   }
   await retainEditorDraft();
+  if(typeof closeSkillCategoryPicker==='function')closeSkillCategoryPicker(false);
   deactivateModal(editorModal);
   editingFilename = null;
   isViewingSkill = false;
@@ -4055,6 +4084,7 @@ function openSettingsModal() {
   settingsScanDir.value = defaultScanDir;
   syncGlobalTargetSettings();
   document.getElementById('settings-aimodel').value = deepseekModel;
+  document.getElementById('settings-reasoning-effort').value = aiReasoningEffort;
   document.getElementById('settings-apibase').value = apiBase;
   // API key field: leave empty placeholder — user must re-enter to change
   document.getElementById('settings-apikey').value = '';
@@ -4076,7 +4106,7 @@ function closeSettingsModal() {
 
 async function handleSettingsPickSkillsDir() {
   try {
-    const result = await window.pywebview.api.change_skills_dir();
+    const result = await window.pywebview.api.change_skills_dir(false);
     if (!result) return;
     if (result.error) throw new Error(result.error);
     settingsSkillsDir.value = result.skills_dir;
@@ -4088,7 +4118,7 @@ async function handleSettingsPickSkillsDir() {
 
 async function handleSettingsPickScanDir() {
   try {
-    const result = await window.pywebview.api.pick_default_scan_dir();
+    const result = await window.pywebview.api.pick_default_scan_dir(false);
     if (!result) return;
     if (result.error) throw new Error(result.error);
     settingsScanDir.value = result.default_scan_dir;
@@ -4118,6 +4148,7 @@ async function handleSaveSettings() {
       );
       return;
     }
+    settings.ai_reasoning_effort = document.getElementById('settings-reasoning-effort').value;
     settings.deepseek_api_key = document.getElementById('settings-apikey').value.trim();
     settings.deepseek_model = document.getElementById('settings-aimodel').value.trim() || deepseekModel;
     settings.api_base = document.getElementById('settings-apibase').value.trim() || apiBase;
@@ -4133,7 +4164,8 @@ async function handleSaveSettings() {
 
     hasAiKey = Boolean(result.has_ai_key);
     apiKeyHint = result.api_key_hint || '';
-    deepseekModel = newModel;
+    deepseekModel = result.deepseek_model || newModel;
+    aiReasoningEffort = result.ai_reasoning_effort || 'high';
     apiBase = newApiBase;
 
     currentLanguage = result.language;
@@ -4344,16 +4376,22 @@ async function closeAIModal() {
 
 
 function renderChatHistory() {
+  const previousScroll=aiChatMessages.scrollTop;
+  const nearBottom=aiChatMessages.scrollHeight-aiChatMessages.clientHeight-previousScroll<100;
+  const changedSession=renderChatHistory.sessionId!==currentSessionId;
+  renderChatHistory.sessionId=currentSessionId;
+  if(typeof renderAgentSessionOverview==='function')renderAgentSessionOverview();
   aiChatMessages.innerHTML = '';
   if (aiChatHistory.length === 0) {
     aiChatMessages.innerHTML = getAgentEmptyStateMarkup();
     lucide.createIcons();
   } else {
     aiChatHistory.forEach(m => {
-      appendChatBubble(m.role, m.content);
+      appendChatBubble(m.role, m.content, false);
     });
   }
-  aiChatMessages.scrollTop = aiChatHistory.length ? aiChatMessages.scrollHeight : 0;
+  aiChatMessages.scrollTop = aiChatHistory.length ? ((changedSession || nearBottom) ? aiChatMessages.scrollHeight : previousScroll) : 0;
+  if(typeof updateAgentLatestButton==='function')updateAgentLatestButton();
   const generateButton = document.getElementById('ai-btn-generate');
   if (generateButton) generateButton.disabled = aiChatHistory.length === 0 || aiIsLoading;
   updateAgentDialogControls();
@@ -4480,7 +4518,7 @@ function formatAgentEvent(event) {
     final: currentLanguage === 'zh' ? '最终回答' : 'Final'
   };
   let title = typeLabels[event.type] || event.type;
-  if (event.tool) title += ` · ${event.tool}`;
+  if (event.tool) title += ` · ${friendlyAgentTool(event.tool)}`;
   let detail = compactAgentText(event.summary || '', 180);
   if (event.type === 'tool_call') {
     const statusLabels = {
@@ -4523,8 +4561,9 @@ function renderAgentRun(result) {
   agentStatusBadge.className = `agent-status-badge ${status}`;
   agentPhase.textContent = result.phase || agentStatusLabel(status);
   agentRunId.textContent = currentAgentRunId
-    ? `${currentAgentRunId.slice(0, 12)} · ${result.step_count || 0}/${result.max_steps || 32} steps`
+    ? `${result.model || deepseekModel} · ${result.step_count || 0} ${currentLanguage === 'zh' ? '轮决策' : 'steps'}${result.usage?.total_tokens ? ` · ${result.usage.total_tokens.toLocaleString()} tokens` : ''}`
     : (currentLanguage === 'zh' ? '尚未开始运行' : 'No run started');
+  agentRunId.title=currentAgentRunId||'';
   agentResumeButton.hidden = status !== 'running';
   const timeline = result.timeline || [];
   const maxVisibleTimelineEvents = 14;
@@ -4546,7 +4585,7 @@ function renderAgentRun(result) {
   currentAgentApprovalId = pending ? pending.approval_id || null : null;
   agentApprovalCard.hidden = !pending;
   if (pending) {
-    agentApprovalTool.textContent = `${pending.tool} ${
+    agentApprovalTool.textContent = `${friendlyAgentTool(pending.tool)} ${
       currentLanguage === 'zh' ? '将执行真实写操作，请核对参数摘要。' : 'will perform a real write. Review the summary.'
     }`;
     agentApprovalArguments.textContent = JSON.stringify(pending.arguments || {}, null, 2);
@@ -4770,24 +4809,16 @@ async function handleAITestConnection() {
   resultDiv.style.display = 'none';
 
   try {
-    // Save the model and base URL first (they might have changed)
+    // Test the settings draft without committing it.
     const modelInput = document.getElementById('settings-aimodel');
     const apiKeyInput = document.getElementById('settings-apikey');
     const apiBaseInput = document.getElementById('settings-apibase');
-    const newModel = modelInput.value.trim() || 'deepseek-chat';
+    const newModel = modelInput.value.trim() || 'deepseek-flash';
     const newApiBase = apiBaseInput.value.trim() || 'https://api.deepseek.com/v1';
 
-    const savedConfig = await window.pywebview.api.save_ai_config(
-      apiKeyInput.value.trim(),
-      newModel,
-      newApiBase
-    );
-    hasAiKey = Boolean(savedConfig.has_ai_key);
-    apiKeyHint = savedConfig.api_key_hint || apiKeyHint;
-    deepseekModel = newModel;
-    apiBase = newApiBase;
-
-    const result = await window.pywebview.api.ai_test_connection();
+    const result = await window.pywebview.api.ai_test_connection({
+      api_key: apiKeyInput.value.trim(), model: newModel, api_base: newApiBase
+    });
     resultDiv.style.display = 'block';
     if (result.ok) {
       resultDiv.style.background = 'var(--green-soft)';
@@ -4944,13 +4975,16 @@ async function copyCurrentAgentConversation() {
   await copyAgentText(transcript);
 }
 
-function appendChatBubble(role, text) {
+function appendChatBubble(role, text, autoScroll = true) {
   const div = document.createElement('div');
-  div.className = `ai-chat-bubble ai-chat-${role}`;
+  div.className = `ai-chat-bubble ai-chat-${role === 'user' ? 'user' : 'ai'}`;
   div.agentMessageRole = role;
   div.agentMessageText = String(text ?? '');
   const content = document.createElement('div');
   content.className = 'ai-chat-bubble-content';
+  const roleLabel=document.createElement('div');roleLabel.className='ai-message-role';
+  roleLabel.innerHTML=role==='user'?`<span>${currentLanguage==='zh'?'你':'You'}</span>`:`<i data-lucide="bot"></i><span>${role==='system'?(currentLanguage==='zh'?'系统':'System'):'SkillOps Agent'}</span>`;
+  div.appendChild(roleLabel);
   content.innerHTML = renderMarkdown(text);
   div.appendChild(content);
   enhanceChatCodeBlocks(content);
@@ -4970,7 +5004,7 @@ function appendChatBubble(role, text) {
   div.appendChild(actions);
 
   aiChatMessages.appendChild(div);
-  aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
+  if(autoScroll)aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
   queueMicrotask(updateAgentDialogControls);
   lucide.createIcons();
 }

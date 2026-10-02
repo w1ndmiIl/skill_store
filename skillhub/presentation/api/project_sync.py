@@ -31,6 +31,7 @@ from skillhub.infrastructure.sync_status import (
 
 
 from skillhub.infrastructure.json_store import file_lock
+from skillhub.infrastructure.skill_resources import walk_skill_resources
 
 
 class ProjectSyncApiMixin:
@@ -40,12 +41,9 @@ class ProjectSyncApiMixin:
 
 
 
-
-
-
-
     def _collect_desired_sync_files(
-        self, project_path: str, enabled_skills: list, *, global_skills=None
+        self, project_path: str, enabled_skills: list, *, global_skills=None,
+        existing_only=False
     ):
         enabled_set = set(enabled_skills or [])
         if global_skills is None:
@@ -71,6 +69,10 @@ class ProjectSyncApiMixin:
             requires_bundle_authorization=False,
         ):
             relative_path = normalize_relative_path(relative_path)
+            if existing_only:
+                target = safe_real_child_path(project_path, relative_path)
+                if not target or not os.path.isfile(target):
+                    return
             if relative_path.lower().startswith(normalize_relative_path(SYNC_STATE_DIR).lower() + "/"):
                 return
             path_key = relative_path.casefold()
@@ -109,6 +111,8 @@ class ProjectSyncApiMixin:
                 continue
 
             if skill.get("folder_kind") == "standard":
+                if existing_only and not os.path.isdir(os.path.join(project_path, ".agent", "skills", filename)):
+                    continue
                 skill_path = os.path.join(source_root, "SKILL.md")
                 if not os.path.isfile(skill_path):
                     continue
@@ -120,9 +124,7 @@ class ProjectSyncApiMixin:
                     active_metadata,
                     self._skill_metadata_for_index(folder_meta),
                 )
-                for root, dirs, files in os.walk(source_root):
-                    dirs[:] = sorted(item for item in dirs if not item.startswith(".git"))
-                    files.sort()
+                for root, dirs, files in walk_skill_resources(source_root):
                     for item in files:
                         source = os.path.join(root, item)
                         relative_path = normalize_relative_path(
@@ -185,9 +187,7 @@ class ProjectSyncApiMixin:
                     self._skill_metadata_for_index(bundled_meta),
                 )
 
-            for root, dirs, files in os.walk(source_root):
-                dirs.sort()
-                files.sort()
+            for root, dirs, files in walk_skill_resources(source_root):
                 for item in files:
                     source = os.path.join(root, item)
                     if not safe_real_child_path(source_root, os.path.relpath(source, source_root)):
@@ -357,6 +357,7 @@ class ProjectSyncApiMixin:
                 registered_path,
                 disabled_filenames,
                 global_skills=global_skills,
+                existing_only=True,
             )
         )
         for relative_path, spec in legacy_desired.items():

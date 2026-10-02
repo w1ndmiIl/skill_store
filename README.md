@@ -1,8 +1,8 @@
 # SkillHub
 
-[English](README_EN.md) · [使用说明书](docs/SkillHub使用说明书.md) · [架构与技术实现手册](docs/ARCHITECTURE.md) · [下载最新版](https://github.com/w1ndwill/skill_store/releases/latest) · [MIT License](LICENSE)
+[English](README_EN.md) · [使用说明书](docs/SkillHub使用说明书.md) · [架构与技术实现手册](docs/ARCHITECTURE.md) · [下载最新版](https://github.com/w1ndmiIl/skill_store/releases/latest) · [MIT License](LICENSE)
 
-SkillHub 是一个本地运行的 AI Skill 管理与同步工具。它用于集中保存可复用的开发规则、工作流和专业能力，并将它们按需应用到不同项目或 Codex、Claude Code、Cursor、Cline、OpenCode、Windsurf、Gemini CLI、VS Code/Copilot 等客户端。当前版本：**3.6.0**。
+SkillHub 是一个本地运行的 AI Skill 管理与同步工具。它用于集中保存可复用的开发规则、工作流和专业能力，并将它们按需应用到不同项目或 Codex、Claude Code、Cursor、Cline、OpenCode、Windsurf、Gemini CLI、VS Code/Copilot 等客户端。当前版本：**3.6.2**。
 
 所有写入都围绕“先检查、再预览、后确认”设计：导入会经过本地体检，项目同步会显示文件级新增、更新、移除和冲突，Agent 写操作绑定一次性审批与当前哈希。配置、会话、记忆、回收站和备份均保存在本机。
 
@@ -125,6 +125,8 @@ SkillHub 支持导入 Markdown、ZIP、标准 `SKILL.md` 文件夹和仓库集�
 
 SkillOps Agent 是 SkillHub 中的辅助模块，用于在现有技能库和项目同步流程上完成 Skill 检索、检查、安装预览和维护。它不取代手动导入、编辑、分类或同步功能，也不提供任意终端访问。
 
+会话列表显示可读标题、对话概览、时间和运行状态，支持搜索与重命名。默认概览在本地整理；“生成 AI 摘要”由用户点击触发，使用已配置服务生成标题和摘要，聊天正文保持完整。分类选择支持搜索和键盘操作。详情见 [3.6.2 更新说明](docs/releases/v3.6.2.md)。
+
 同一聊天会话内的后续消息会恢复受限且已脱敏的近期会话上下文，用于理解省略和指代；长期结构化记忆仍单独保存项目事实、偏好和已批准决策。当前消息优先，历史助手回复不能授权写入、联网或改变审批规则。
 
 ![SkillOps Agent 中文工作区](docs/screenshots/zh/skillops-agent.png)
@@ -137,7 +139,7 @@ SkillOps Agent 是 SkillHub 中的辅助模块，用于在现有技能库和项�
 
 ## 快速开始
 
-1. 从 [GitHub Releases](https://github.com/w1ndwill/skill_store/releases/latest) 下载 `SkillHub.exe`。
+1. 从 [GitHub Releases](https://github.com/w1ndmiIl/skill_store/releases/latest) 下载 `SkillHub.exe`。
 2. 启动程序并选择全局 Skill 库目录。
 3. 导入 `.md`、`.zip`、标准 Skill 文件夹或 Skill 集合。
 4. 可在设置中调整默认目标；点击某个 Skill 的“全局启用”后，为它单独选择客户端。
@@ -154,7 +156,7 @@ SkillOps Agent 是 SkillHub 中的辅助模块，用于在现有技能库和项�
 ## 从源码运行
 
 ```powershell
-git clone https://github.com/w1ndwill/skill_store.git
+git clone https://github.com/w1ndmiIl/skill_store.git
 cd skill_store
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1

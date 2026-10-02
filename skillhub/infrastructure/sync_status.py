@@ -1,6 +1,7 @@
 """Read-only project synchronization status evaluation."""
 
 import os
+from .skill_resources import walk_skill_resources
 
 from skillhub.infrastructure.filesystem import (
     get_file_md5,
@@ -45,8 +46,7 @@ def check_dir_sync_status(
         normalize_relative_path(path).lower()
         for path in (ignored_relative_paths or set())
     }
-    for root, dirs, files in os.walk(src_dir):
-        dirs.sort()
+    for root, dirs, files in walk_skill_resources(src_dir):
         for f in files:
             src_file = os.path.join(root, f)
             rel_path = os.path.relpath(src_file, src_dir)
